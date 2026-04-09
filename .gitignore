@@ -1,0 +1,56 @@
+# Бинарные файлы
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+protoc-gen-go
+
+# Тестовые артефакты
+*.test
+*.out
+coverage.out
+coverage.html
+*.prof
+
+# Временные DSL файлы
+test*.dsl
+*_test.dsl
+test_*.dsl
+tmp*.dsl
+
+# Сгенерированные файлы
+*.gen.go
+demo/protocol/
+examples/*/*.gen.go
+testdata/*.gen.go
+
+# Демо артефакты
+demo/go.sum
+
+# Зависимости
+vendor/
+
+# Go workspace
+go.work
+go.work.sum
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.cursor/
+.code-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Временные файлы
+*.tmp
+*.bak
+*.log

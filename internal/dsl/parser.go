@@ -1,33 +1,36 @@
-// internal/dsl/parser.go
 package dsl
 
 import (
 	"fmt"
+	"os"
 	"strconv"
+	"strings"
 
 	"github.com/alecthomas/participle/v2"
 	"github.com/alecthomas/participle/v2/lexer"
-	"github.com/yourusername/protoc-gen-go/internal/ast"
+	"github.com/feronski-bkpk/protoc-gen-go/internal/ast"
 )
 
 var (
 	dslLexer = lexer.MustSimple([]lexer.SimpleRule{
-		{"Keyword", `protocol|struct|id|bit|bits|if|length_from|length|max_length`},
-		{"Ident", `[a-zA-Z_][a-zA-Z0-9_]*`},
-		{"HexNumber", `0x[0-9a-fA-F]+`},
-		{"Number", `\d+`},
-		{"Punct", `[(){}\[\]:.,;=]|==|!=|<=|>=|<|>`},
-		{"Comment", `//[^\n]*`},
-		{"Whitespace", `\s+`},
+		{Name: "Keyword", Pattern: `protocol|struct|id|if|length_from`},
+		{Name: "Type", Pattern: `uint8|uint16|uint32|uint64|int8|int16|int32|int64|float32|float64|bytes`},
+		{Name: "Ident", Pattern: `[a-zA-Z_][a-zA-Z0-9_]*`},
+		{Name: "HexNumber", Pattern: `0x[0-9a-fA-F]+`},
+		{Name: "Number", Pattern: `\d+`},
+		{Name: "Operator", Pattern: `==|!=|<=|>=|<|>`},
+		{Name: "Punct", Pattern: `[(){}\[\]:;]`},
+		{Name: "Comment", Pattern: `//[^\n]*`},
+		{Name: "Whitespace", Pattern: `\s+`},
 	})
 )
 
 type Parser struct {
-	parser *participle.Parser[dslProtocol]
+	parser *participle.Parser[Protocol]
 }
 
 func NewParser() *Parser {
-	parser := participle.MustBuild[dslProtocol](
+	parser := participle.MustBuild[Protocol](
 		participle.Lexer(dslLexer),
 		participle.Elide("Comment", "Whitespace"),
 	)
@@ -39,28 +42,29 @@ func (p *Parser) ParseString(input string) (*ast.Protocol, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse error: %w", err)
 	}
-
 	return dslProto.ToAST()
 }
 
 func (p *Parser) ParseFile(filename string) (*ast.Protocol, error) {
-	dslProto, err := p.parser.ParseFile(filename)
+	data, err := os.ReadFile(filename)
+	if err != nil {
+		return nil, fmt.Errorf("read file %s: %w", filename, err)
+	}
+	dslProto, err := p.parser.ParseBytes(filename, data)
 	if err != nil {
 		return nil, fmt.Errorf("parse file %s: %w", filename, err)
 	}
-
 	return dslProto.ToAST()
 }
 
-// DSL структуры для парсинга
-type dslProtocol struct {
-	Name   string      `parser:"'protocol' @Ident '{'"`
-	ID     string      `parser:"'id' ':' @HexNumber"`
-	Fields []*dslField `parser:"@@* '}'"`
+type Protocol struct {
+	Name string   `parser:"'protocol' @Ident '{'"`
+	ID   string   `parser:"'id' ':' @HexNumber"`
+	Body []*Field `parser:"@@* '}'"`
 }
 
-func (p *dslProtocol) ToAST() (*ast.Protocol, error) {
-	packetID, err := strconv.ParseUint(p.ID[2:], 16, 16)
+func (p *Protocol) ToAST() (*ast.Protocol, error) {
+	packetID, err := strconv.ParseUint(strings.TrimPrefix(p.ID, "0x"), 16, 16)
 	if err != nil {
 		return nil, fmt.Errorf("invalid packet ID: %s", p.ID)
 	}
@@ -72,168 +76,96 @@ func (p *dslProtocol) ToAST() (*ast.Protocol, error) {
 		Fields:   make([]ast.Field, 0),
 	}
 
-	for _, f := range p.Fields {
+	for _, f := range p.Body {
 		field, err := f.ToAST()
 		if err != nil {
 			return nil, err
 		}
-		proto.Fields = append(proto.Fields, field)
+		if field != nil {
+			proto.Fields = append(proto.Fields, field)
+		}
 	}
 
 	return proto, nil
 }
 
-type dslField struct {
-	Name      string        `parser:"@Ident ':'"`
-	Type      *dslFieldType `parser:"@@"`
-	Condition *dslCondition `parser:"( 'if' @@ )?"`
+type Field struct {
+	Name       string     `parser:"@Ident ':'"`
+	Type       *FieldType `parser:"@@"`
+	LengthFrom *string    `parser:"( 'length_from' ':' @Ident )?"`
+	Condition  *Condition `parser:"( 'if' @@ )?"`
 }
 
-func (f *dslField) ToAST() (ast.Field, error) {
-	astType, isStruct, structName := f.Type.ToAST()
+func (f *Field) ToAST() (ast.Field, error) {
+	if f.Type == nil {
+		return nil, nil
+	}
 
 	condition, err := f.Condition.ToAST()
 	if err != nil {
 		return nil, err
 	}
 
-	switch t := astType.(type) {
-	case ast.ScalarType:
+	lengthFrom := ""
+	if f.LengthFrom != nil {
+		lengthFrom = *f.LengthFrom
+	}
+
+	if f.Type.Scalar != nil {
 		return &ast.ScalarField{
 			Name:      f.Name,
-			Type:      t,
+			Type:      ast.ScalarType(*f.Type.Scalar),
 			Condition: condition,
 		}, nil
+	}
 
-	case *ast.ArrayField:
-		t.Name = f.Name
-		t.Condition = condition
-		return t, nil
-
-	case *ast.BytesField:
-		t.Name = f.Name
-		t.Condition = condition
-		return t, nil
-
-	case *ast.StructType:
-		if isStruct {
-			// Это вложенное определение структуры
-			structName = f.Name + "_struct"
+	if f.Type.Struct != nil {
+		fields := make([]ast.Field, 0)
+		for _, sf := range f.Type.Struct.Body {
+			field, err := sf.ToAST()
+			if err != nil {
+				return nil, err
+			}
+			if field != nil {
+				fields = append(fields, field)
+			}
 		}
+
 		return &ast.StructField{
 			Name:      f.Name,
-			TypeRef:   structName,
-			Struct:    t,
+			Struct:    &ast.StructType{Fields: fields},
 			Condition: condition,
 		}, nil
 	}
 
-	return nil, fmt.Errorf("unknown field type for %s", f.Name)
-}
-
-type dslFieldType struct {
-	Scalar *string       `parser:"  @('uint8'|'uint16'|'uint32'|'uint64'|'int8'|'int16'|'int32'|'int64'|'float32'|'float64')"`
-	Bit    *dslBitField  `parser:"| @('bit'|'bits')"`
-	Struct *dslStructDef `parser:"| 'struct' '{' @@ '}'"`
-	Array  *dslArraySpec `parser:"| '[]' @@"`
-	Bytes  *dslBytesSpec `parser:"| 'bytes' '(' @@? ')'"`
-}
-
-func (t *dslFieldType) ToAST() (interface{}, bool, string) {
-	if t.Scalar != nil {
-		return ast.ScalarType(*t.Scalar), false, ""
+	if f.Type.Bytes {
+		return &ast.BytesField{
+			Name:       f.Name,
+			LengthFrom: lengthFrom,
+			Condition:  condition,
+		}, nil
 	}
 
-	if t.Bit != nil {
-		// Битовые поля будут обработаны позже
-		return nil, false, ""
-	}
-
-	if t.Struct != nil {
-		fields := make([]ast.Field, 0)
-		for _, f := range t.Struct.Fields {
-			field, _ := f.ToAST()
-			fields = append(fields, field)
-		}
-
-		structType := &ast.StructType{
-			Name:        "",
-			Fields:      fields,
-			IsBitPacked: t.Struct.IsBitPacked,
-		}
-		return structType, true, ""
-	}
-
-	if t.Array != nil {
-		elemType, isStruct, structName := t.Array.Element.ToAST()
-
-		var elemField ast.Field
-		switch et := elemType.(type) {
-		case ast.ScalarType:
-			elemField = &ast.ScalarField{Type: et}
-		case *ast.StructType:
-			if isStruct {
-				structName = "elem_struct"
-			}
-			elemField = &ast.StructField{TypeRef: structName, Struct: et}
-		}
-
-		array := &ast.ArrayField{
-			Element: elemField,
-		}
-
-		if t.Array.LengthFrom != nil {
-			array.LengthFrom = *t.Array.LengthFrom
-		}
-		if t.Array.FixedLength != nil {
-			array.FixedLength = *t.Array.FixedLength
-		}
-
-		return array, false, ""
-	}
-
-	if t.Bytes != nil {
-		bytes := &ast.BytesField{}
-		if t.Bytes.LengthFrom != nil {
-			bytes.LengthFrom = *t.Bytes.LengthFrom
-		}
-		if t.Bytes.MaxLength != nil {
-			bytes.MaxLength = *t.Bytes.MaxLength
-		}
-		return bytes, false, ""
-	}
-
-	return nil, false, ""
+	return nil, nil
 }
 
-type dslBitField struct {
-	Type string `parser:"@('bit'|'bits')"`
-	Bits int    `parser:"'(' @Number ')'"`
+type FieldType struct {
+	Scalar *string `parser:"  @('uint8'|'uint16'|'uint32'|'uint64'|'int8'|'int16'|'int32'|'int64'|'float32'|'float64')"`
+	Struct *Struct `parser:"| 'struct' @@"`
+	Bytes  bool    `parser:"| @'bytes'"`
 }
 
-type dslStructDef struct {
-	Fields      []*dslField `parser:"'{' @@* '}'"`
-	IsBitPacked bool
+type Struct struct {
+	Body []*Field `parser:"'{' @@* '}'"`
 }
 
-type dslArraySpec struct {
-	Element     *dslFieldType `parser:"@@"`
-	LengthFrom  *string       `parser:"( 'length_from' ':' @Ident )?"`
-	FixedLength *int          `parser:"| 'length' ':' @Number"`
-}
-
-type dslBytesSpec struct {
-	LengthFrom *string `parser:"'length_from' ':' @Ident"`
-	MaxLength  *int    `parser:"| 'max_length' ':' @Number"`
-}
-
-type dslCondition struct {
+type Condition struct {
 	Field string `parser:"@Ident"`
 	Op    string `parser:"@('=='|'!='|'>'|'<'|'>='|'<=')"`
 	Value string `parser:"@(Number|HexNumber)"`
 }
 
-func (c *dslCondition) ToAST() (*ast.Condition, error) {
+func (c *Condition) ToAST() (*ast.Condition, error) {
 	if c == nil {
 		return nil, nil
 	}
@@ -241,7 +173,7 @@ func (c *dslCondition) ToAST() (*ast.Condition, error) {
 	var val uint64
 	var err error
 
-	if len(c.Value) > 2 && c.Value[:2] == "0x" {
+	if strings.HasPrefix(c.Value, "0x") {
 		val, err = strconv.ParseUint(c.Value[2:], 16, 64)
 	} else {
 		val, err = strconv.ParseUint(c.Value, 10, 64)

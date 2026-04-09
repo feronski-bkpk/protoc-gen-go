@@ -1,4 +1,3 @@
-// internal/ast/types.go
 package ast
 
 type ScalarType string
@@ -57,7 +56,7 @@ func (f *ScalarField) GetSize() int    { return f.Type.Size() }
 
 type StructField struct {
 	Name      string
-	TypeRef   string // ссылка на имя структуры в Types
+	TypeRef   string
 	Struct    *StructType
 	Offset    int
 	Condition *Condition
@@ -82,8 +81,8 @@ type StructType struct {
 type ArrayField struct {
 	Name        string
 	Element     Field
-	LengthFrom  string // поле с длиной
-	FixedLength int    // или фиксированная длина
+	LengthFrom  string
+	FixedLength int
 	Offset      int
 	Condition   *Condition
 }
@@ -91,7 +90,6 @@ type ArrayField struct {
 func (f *ArrayField) GetName() string { return f.Name }
 func (f *ArrayField) GetType() string { return "[]" + f.Element.GetType() }
 func (f *ArrayField) GetSize() int {
-	// Для массивов переменной длины возвращаем 0
 	if f.FixedLength > 0 {
 		return f.Element.GetSize() * f.FixedLength
 	}
@@ -115,3 +113,23 @@ type Condition struct {
 	Operator string
 	Value    uint64
 }
+
+// BitField представляет битовое поле
+type BitField struct {
+	Name    string
+	Bit     int
+	HighBit int
+	LowBit  int
+	IsRange bool
+}
+
+// BitStruct представляет структуру из битовых полей
+type BitStructField struct {
+	Name      string
+	Fields    []*BitField
+	Condition *Condition
+}
+
+func (f *BitStructField) GetName() string { return f.Name }
+func (f *BitStructField) GetType() string { return "bitfield" }
+func (f *BitStructField) GetSize() int    { return 1 }
