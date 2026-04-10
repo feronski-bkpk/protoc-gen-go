@@ -114,8 +114,7 @@ type Condition struct {
 	Value    uint64
 }
 
-// BitField представляет битовое поле
-type BitField struct {
+type BitFieldSpec struct {
 	Name    string
 	Bit     int
 	HighBit int
@@ -123,13 +122,12 @@ type BitField struct {
 	IsRange bool
 }
 
-// BitStruct представляет структуру из битовых полей
 type BitStructField struct {
 	Name      string
-	Fields    []*BitField
+	Fields    []*BitFieldSpec
 	Condition *Condition
 }
 
 func (f *BitStructField) GetName() string { return f.Name }
-func (f *BitStructField) GetType() string { return "bitfield" }
+func (f *BitStructField) GetType() string { return "bitstruct" }
 func (f *BitStructField) GetSize() int    { return 1 }

@@ -32,6 +32,30 @@ make build
 make install
 ```
 
+## Быстрый старт
+
+```bash
+# Создайте DSL файл
+cat > sensor.dsl << 'EOF'
+protocol SensorData {
+    id: 0xABCD
+    device_id: uint32
+    temperature: float32
+    flags: bitstruct {
+        ack: bit(7)
+        error: bit(6)
+    }
+    name_len: uint16
+    name: bytes length_from: name_len
+}
+EOF
+
+# Сгенерируйте код
+protoc-gen-go sensor.dsl
+
+# Используйте в проекте
+```
+
 ## Использование
 
 ### CLI
@@ -44,17 +68,18 @@ protoc-gen-go <файл.dsl>
 
 ### Makefile
 
-Основные команды:
-
 | Команда | Назначение |
 |---------|------------|
 | `make build` | собрать бинарный файл |
-| `make test` | запустить тесты |
+| `make test` | запустить модульные тесты |
+| `make test-integration` | запустить интеграционные тесты |
+| `make test-all` | запустить все тесты |
 | `make demo` | запустить демонстрационный пример |
-| `make clean` | удалить артефакты сборки и сгенерированные файлы |
+| `make clean` | удалить артефакты сборки |
 | `make fmt` | форматировать код |
 | `make lint` | запустить go vet |
 | `make install` | установить в `$GOPATH/bin` |
+| `make help` | показать справку |
 
 ## DSL — синтаксис и правила
 
@@ -93,12 +118,36 @@ protocol <ИмяПротокола> {
 | `float32` | 4 |
 | `float64` | 8 |
 
+### Битовые поля (bitstruct)
+
+```
+<имя>: bitstruct {
+    <имя_бита>: bit(<номер>)
+    ...
+}
+```
+
+Биты нумеруются от 0 до 7. Все биты упаковываются в один байт (`uint8`).
+Для каждого бита генерируются методы `Get<Имя>()` и `Set<Имя>(bool)`.
+
 Пример:
 
 ```
-device_id: uint32
-temperature: float32
-flags: uint8
+flags: bitstruct {
+    ack: bit(7)
+    error: bit(6)
+    priority: bit(5)
+    enabled: bit(4)
+}
+```
+
+Использование в коде:
+
+```go
+data.SetAck(true)
+if data.GetError() {
+    // обработка ошибки
+}
 ```
 
 ### Вложенные структуры
@@ -111,16 +160,6 @@ flags: uint8
 
 Вложенные структуры генерируются как отдельные Go-типы с собственными методами `Size`, `MarshalBinary`, `UnmarshalBinary`.
 
-Пример:
-
-```
-location: struct {
-    latitude: float64
-    longitude: float64
-    altitude: int32
-}
-```
-
 ### Поля переменной длины (bytes)
 
 ```
@@ -128,14 +167,7 @@ location: struct {
 ```
 
 - `<поле_длины>` должно быть объявлено **ранее** в том же протоколе.
-- Тип поля длины — только беззнаковое целое (`uint8`, `uint16`, `uint32`, `uint64`).
-
-Пример:
-
-```
-name_len: uint16
-name: bytes length_from: name_len
-```
+- Тип поля длины — беззнаковое целое (`uint8`, `uint16`, `uint32`, `uint64`).
 
 ### Условные поля
 
@@ -146,13 +178,6 @@ name: bytes length_from: name_len
 
 Условие проверяется **при сериализации и десериализации**.  
 Поддерживаемые операторы: `==`, `!=`, `<`, `>`, `<=`, `>=`.
-
-Пример:
-
-```
-error_msg_len: uint16
-error_msg: bytes length_from: error_msg_len if flags == 1
-```
 
 ### Комментарии
 
@@ -174,11 +199,10 @@ type SensorData struct {
     Device_id   uint32
     Timestamp   uint64
     Temperature float32
+    Flags       uint8 // bitstruct
     // ...
 }
 ```
-
-Имена полей — с заглавной буквы, подчёркивания сохраняются.
 
 ### Методы
 
@@ -186,6 +210,10 @@ type SensorData struct {
 func (p *SensorData) Size() int
 func (p *SensorData) MarshalBinary() ([]byte, error)
 func (p *SensorData) UnmarshalBinary(data []byte) error
+
+// Для битовых полей
+func (p *SensorData) GetAck() bool
+func (p *SensorData) SetAck(val bool)
 ```
 
 ### Константы смещений
@@ -193,9 +221,24 @@ func (p *SensorData) UnmarshalBinary(data []byte) error
 ```go
 const SensorData_Device_id_Offset = 0
 const SensorData_Device_id_Size   = 4
+const SensorData_Flags_Offset     = 17
+const SensorData_Flags_Size       = 1
 ```
 
-Позволяют при необходимости обращаться к полям вручную.
+## Демонстрация
+
+Запустите готовый демонстрационный пример:
+
+```bash
+make demo
+```
+
+Демо показывает:
+- Создание структуры с тестовыми данными
+- Установку битовых флагов
+- Сериализацию в бинарный формат с разбором по байтам
+- Десериализацию и проверку корректности
+- Сгенерированные константы смещений
 
 ## Структура проекта
 
@@ -206,36 +249,23 @@ const SensorData_Device_id_Size   = 4
 │   ├── ast/                    # определения AST
 │   ├── dsl/                    # парсер DSL
 │   └── generator/              # генератор Go-кода
-├── pkg/protocol/               # runtime-функции (опционально)
+├── pkg/protocol/               # runtime-функции
 ├── examples/                   # примеры DSL
+│   ├── simple/                 # простые примеры
+│   └── bitfields/              # примеры битовых полей
 ├── demo/                       # демонстрационная программа
+│   └── run.go                  # автономное демо
 ├── testdata/                   # данные для тестов
-├── makefile
+├── Makefile
 ├── go.mod
 ├── LICENSE
 └── README.md
 ```
 
-## Что уже реализовано
-
-- Все скалярные типы (`uint8`…`float64`)
-- Вложенные структуры произвольной глубины
-- Поля `bytes` с явным указанием длины через `length_from`
-- Условные поля (`if`)
-- Big Endian кодирование
-- Константы смещений и размеров
-- Полный набор методов сериализации
-- Тесты парсера
-- Демонстрационный пример
-
 ## Что планируется
 
 - Массивы фиксированной длины
-- Битовые поля (упаковка нескольких полей в байты)
+- Диапазоны битов `bits(старший, младший)`
 - Опциональная поддержка Little Endian
 - Валидация значений на этапе сериализации
 - Компактное бинарное представление схемы протокола
-
-## Лицензия
-
-MIT. Полный текст см. в файле [LICENSE](LICENSE).

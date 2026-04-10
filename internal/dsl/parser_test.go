@@ -150,3 +150,32 @@ protocol Packet {
 	assert.Equal(t, "data", bytesField.Name)
 	assert.Equal(t, "data_len", bytesField.LengthFrom)
 }
+
+func TestParser_BitFields(t *testing.T) {
+	input := `
+protocol BitTest {
+    id: 0x6000
+    flags: bitstruct {
+        ack: bit(7)
+        error: bit(6)
+        ready: bit(5)
+        enabled: bit(4)
+    }
+}
+`
+	parser := NewParser()
+	proto, err := parser.ParseString(input)
+
+	require.NoError(t, err)
+	assert.Len(t, proto.Fields, 1)
+
+	bitField := proto.Fields[0].(*ast.BitStructField)
+	assert.Equal(t, "flags", bitField.Name)
+	assert.Len(t, bitField.Fields, 4)
+
+	assert.Equal(t, "ack", bitField.Fields[0].Name)
+	assert.Equal(t, 7, bitField.Fields[0].Bit)
+
+	assert.Equal(t, "error", bitField.Fields[1].Name)
+	assert.Equal(t, 6, bitField.Fields[1].Bit)
+}

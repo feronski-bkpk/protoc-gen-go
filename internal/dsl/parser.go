@@ -13,9 +13,9 @@ import (
 
 var (
 	dslLexer = lexer.MustSimple([]lexer.SimpleRule{
-		{Name: "Keyword", Pattern: `protocol|struct|id|if|length_from`},
-		{Name: "Type", Pattern: `uint8|uint16|uint32|uint64|int8|int16|int32|int64|float32|float64|bytes`},
+		{Name: "Keyword", Pattern: `protocol|struct|bitstruct|id|if|length_from|bit`},
 		{Name: "Ident", Pattern: `[a-zA-Z_][a-zA-Z0-9_]*`},
+		{Name: "Type", Pattern: `uint8|uint16|uint32|uint64|int8|int16|int32|int64|float32|float64|bytes`},
 		{Name: "HexNumber", Pattern: `0x[0-9a-fA-F]+`},
 		{Name: "Number", Pattern: `\d+`},
 		{Name: "Operator", Pattern: `==|!=|<=|>=|<|>`},
@@ -138,6 +138,24 @@ func (f *Field) ToAST() (ast.Field, error) {
 		}, nil
 	}
 
+	if f.Type.BitStruct != nil {
+		bitFields := make([]*ast.BitFieldSpec, 0)
+		for _, bf := range f.Type.BitStruct.Fields {
+
+			bitFields = append(bitFields, &ast.BitFieldSpec{
+				Name:    bf.Name,
+				Bit:     bf.Bit,
+				IsRange: false,
+			})
+		}
+
+		return &ast.BitStructField{
+			Name:      f.Name,
+			Fields:    bitFields,
+			Condition: condition,
+		}, nil
+	}
+
 	if f.Type.Bytes {
 		return &ast.BytesField{
 			Name:       f.Name,
@@ -150,13 +168,24 @@ func (f *Field) ToAST() (ast.Field, error) {
 }
 
 type FieldType struct {
-	Scalar *string `parser:"  @('uint8'|'uint16'|'uint32'|'uint64'|'int8'|'int16'|'int32'|'int64'|'float32'|'float64')"`
-	Struct *Struct `parser:"| 'struct' @@"`
-	Bytes  bool    `parser:"| @'bytes'"`
+	Scalar    *string       `parser:"  @('uint8'|'uint16'|'uint32'|'uint64'|'int8'|'int16'|'int32'|'int64'|'float32'|'float64')"`
+	Struct    *Struct       `parser:"| 'struct' @@"`
+	BitStruct *BitStructDef `parser:"| 'bitstruct' @@"`
+	Bytes     bool          `parser:"| @'bytes'"`
 }
 
 type Struct struct {
 	Body []*Field `parser:"'{' @@* '}'"`
+}
+
+type BitStructDef struct {
+	Fields []*BitFieldDef `parser:"'{' @@* '}'"`
+}
+
+type BitFieldDef struct {
+	Name string `parser:"@Ident ':' 'bit' '('"`
+	Bit  int    `parser:"@Number"`
+	End  string `parser:"')'"`
 }
 
 type Condition struct {

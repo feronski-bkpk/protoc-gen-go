@@ -5,7 +5,6 @@ bin/
 *.dll
 *.so
 *.dylib
-protoc-gen-go
 
 # Тестовые артефакты
 *.test
@@ -22,12 +21,6 @@ tmp*.dsl
 
 # Сгенерированные файлы
 *.gen.go
-demo/protocol/
-examples/*/*.gen.go
-testdata/*.gen.go
-
-# Демо артефакты
-demo/go.sum
 
 # Зависимости
 vendor/
@@ -43,7 +36,6 @@ go.work.sum
 *.swo
 *~
 .cursor/
-.code-workspace
 
 # OS
 .DS_Store
@@ -54,3 +46,12 @@ desktop.ini
 *.tmp
 *.bak
 *.log
+
+# Демо и примеры (генерируемые)
+demo/*.gen.go
+examples/*/*.gen.go
+examples/*/protocol/
+testdata/protocol/
+testdata/*.gen.go
+testdata/go.mod
+testdata/go.sum
