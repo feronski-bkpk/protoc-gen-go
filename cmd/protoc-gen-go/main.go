@@ -106,9 +106,26 @@ func printFields(fields []ast.Field, indent int) {
 		case *ast.BitStructField:
 			fmt.Printf("%s- %s: bitstruct {\n", prefix, f.Name)
 			for _, bit := range f.Fields {
-				fmt.Printf("%s    %s: bit(%d)\n", prefix, bit.Name, bit.Bit)
+				if bit.IsRange {
+					fmt.Printf("%s    %s: bits[%d:%d]\n", prefix, bit.Name, bit.HighBit, bit.LowBit)
+				} else {
+					fmt.Printf("%s    %s: bit(%d)\n", prefix, bit.Name, bit.Bit)
+				}
 			}
 			fmt.Printf("%s  }", prefix)
+			if f.Condition != nil {
+				fmt.Printf(" [если %s %s %d]", f.Condition.Field, f.Condition.Operator, f.Condition.Value)
+			}
+			fmt.Println()
+
+		case *ast.ArrayField:
+			fmt.Printf("%s- %s: []", prefix, f.Name)
+			switch elem := f.ElementType.(type) {
+			case *ast.ScalarField:
+				fmt.Printf("%s", elem.Type)
+			case *ast.StructField:
+				fmt.Printf("struct")
+			}
 			if f.Condition != nil {
 				fmt.Printf(" [если %s %s %d]", f.Condition.Field, f.Condition.Operator, f.Condition.Value)
 			}

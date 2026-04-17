@@ -78,24 +78,6 @@ type StructType struct {
 	IsBitPacked bool
 }
 
-type ArrayField struct {
-	Name        string
-	Element     Field
-	LengthFrom  string
-	FixedLength int
-	Offset      int
-	Condition   *Condition
-}
-
-func (f *ArrayField) GetName() string { return f.Name }
-func (f *ArrayField) GetType() string { return "[]" + f.Element.GetType() }
-func (f *ArrayField) GetSize() int {
-	if f.FixedLength > 0 {
-		return f.Element.GetSize() * f.FixedLength
-	}
-	return 0
-}
-
 type BytesField struct {
 	Name       string
 	LengthFrom string
@@ -131,3 +113,20 @@ type BitStructField struct {
 func (f *BitStructField) GetName() string { return f.Name }
 func (f *BitStructField) GetType() string { return "bitstruct" }
 func (f *BitStructField) GetSize() int    { return 1 }
+
+type ArrayField struct {
+	Name        string
+	ElementType Field
+	FixedLength int
+	LengthFrom  string
+	Condition   *Condition
+}
+
+func (f *ArrayField) GetName() string { return f.Name }
+func (f *ArrayField) GetType() string { return "[]" + f.ElementType.GetType() }
+func (f *ArrayField) GetSize() int {
+	if f.FixedLength > 0 {
+		return f.ElementType.GetSize() * f.FixedLength
+	}
+	return 0
+}

@@ -2,6 +2,9 @@
 
 Генератор Go-кода для бинарных протоколов, описанных в человеко-читаемом DSL.
 
+[![Go Version](https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat&logo=go)](https://go.dev/)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 ## Назначение
 
 Инструмент позволяет:
@@ -44,7 +47,10 @@ protocol SensorData {
     flags: bitstruct {
         ack: bit(7)
         error: bit(6)
+        priority: bits[5:4]
     }
+    readings_len: uint16
+    readings: []float32 length: readings_len
     name_len: uint16
     name: bytes length_from: name_len
 }
@@ -71,11 +77,13 @@ protoc-gen-go <файл.dsl>
 | Команда | Назначение |
 |---------|------------|
 | `make build` | собрать бинарный файл |
-| `make test` | запустить модульные тесты |
-| `make test-integration` | запустить интеграционные тесты |
-| `make test-all` | запустить все тесты |
-| `make demo` | запустить демонстрационный пример |
-| `make clean` | удалить артефакты сборки |
+| `make test` | модульные тесты |
+| `make test-integration` | интеграционные тесты |
+| `make test-all` | все тесты |
+| `make demo` | демонстрация базового протокола |
+| `make demo-arrays` | демонстрация слайсов |
+| `make demo-dns` | демонстрация DNS протокола |
+| `make clean` | удалить артефакты |
 | `make fmt` | форматировать код |
 | `make lint` | запустить go vet |
 | `make install` | установить в `$GOPATH/bin` |
@@ -89,120 +97,99 @@ protoc-gen-go <файл.dsl>
 protocol <ИмяПротокола> {
     id: <HexID>
     <поле>
-    <поле>
     ...
 }
 ```
 
 - `<ИмяПротокола>` — допустимый Go-идентификатор.
-- `<HexID>` — идентификатор пакета в шестнадцатеричном виде (например, `0x1234`).
+- `<HexID>` — идентификатор протокола в шестнадцатеричном виде (например, `0x1234`).
 
 ### Скалярные поля
 
-```
-<имя>: <тип>
-```
-
-Поддерживаемые типы:
-
-| Тип | Размер (байт) |
-|-----|---------------|
-| `uint8` | 1 |
-| `uint16` | 2 |
-| `uint32` | 4 |
-| `uint64` | 8 |
-| `int8` | 1 |
-| `int16` | 2 |
-| `int32` | 4 |
-| `int64` | 8 |
-| `float32` | 4 |
-| `float64` | 8 |
+| Тип | Размер | | Тип | Размер |
+|-----|--------|-|-----|--------|
+| `uint8` | 1 | | `int8` | 1 |
+| `uint16` | 2 | | `int16` | 2 |
+| `uint32` | 4 | | `int32` | 4 |
+| `uint64` | 8 | | `int64` | 8 |
+| `float32` | 4 | | `float64` | 8 |
 
 ### Битовые поля (bitstruct)
 
 ```
-<имя>: bitstruct {
-    <имя_бита>: bit(<номер>)
-    ...
-}
-```
-
-Биты нумеруются от 0 до 7. Все биты упаковываются в один байт (`uint8`).
-Для каждого бита генерируются методы `Get<Имя>()` и `Set<Имя>(bool)`.
-
-Пример:
-
-```
 flags: bitstruct {
-    ack: bit(7)
-    error: bit(6)
-    priority: bit(5)
-    enabled: bit(4)
-}
-```
-
-Использование в коде:
-
-```go
-data.SetAck(true)
-if data.GetError() {
-    // обработка ошибки
+    ack: bit(7)           // одиночный бит → GetAck() bool, SetAck(bool)
+    opcode: bits[6:3]     // диапазон 4 бита → GetOpcode() uint8, SetOpcode(uint8)
+    reserved: bits[2:0]   // диапазон 3 бита → GetReserved() uint8, SetReserved(uint8)
 }
 ```
 
 ### Вложенные структуры
 
 ```
-<имя>: struct {
-    <поля>
+location: struct {
+    latitude: float64
+    longitude: float64
+    altitude: int32
 }
 ```
-
-Вложенные структуры генерируются как отдельные Go-типы с собственными методами `Size`, `MarshalBinary`, `UnmarshalBinary`.
 
 ### Поля переменной длины (bytes)
 
 ```
-<имя>: bytes length_from: <поле_длины>
+name_len: uint16
+name: bytes length_from: name_len
 ```
 
-- `<поле_длины>` должно быть объявлено **ранее** в том же протоколе.
-- Тип поля длины — беззнаковое целое (`uint8`, `uint16`, `uint32`, `uint64`).
+### Слайсы (массивы переменной длины)
+
+```
+readings_len: uint16
+readings: []float32 length: readings_len
+
+samples_len: uint8
+samples: []struct {
+    x: float32
+    y: float32
+    z: float32
+} length: samples_len
+```
+
+Для слайсов обязательно указывать поле длины через `length: <поле>`.
 
 ### Условные поля
 
 ```
-<имя>: <тип> if <условие>
-<имя>: bytes length_from: <поле> if <условие>
+error_msg: bytes length_from: error_len if flags == 1
+extended: uint32 if flags == 2
 ```
 
-Условие проверяется **при сериализации и десериализации**.  
 Поддерживаемые операторы: `==`, `!=`, `<`, `>`, `<=`, `>=`.
 
 ### Комментарии
 
-Поддерживаются однострочные комментарии:
-
 ```
-// комментарий
-sensor_id: uint16   // идентификатор датчика
+// однострочный комментарий
+field: uint16   // после поля
 ```
 
 ## Что генерируется
-
-Для протокола с именем `SensorData` создаётся:
 
 ### Структура
 
 ```go
 type SensorData struct {
-    Device_id   uint32
-    Timestamp   uint64
-    Temperature float32
-    Flags       uint8 // bitstruct
-    // ...
+    Device_id    uint32
+    Temperature  float32
+    Flags        uint8 // bitstruct
+    Readings_len uint16
+    Readings     []float32
+    Name_len     uint16
+    Name         []byte
 }
 ```
+
+Для анонимных структур в слайсах создаётся отдельный тип с суффиксом `Elem` (например, `SamplesElem`).
 
 ### Методы
 
@@ -211,9 +198,13 @@ func (p *SensorData) Size() int
 func (p *SensorData) MarshalBinary() ([]byte, error)
 func (p *SensorData) UnmarshalBinary(data []byte) error
 
-// Для битовых полей
+// Для bit(7)
 func (p *SensorData) GetAck() bool
 func (p *SensorData) SetAck(val bool)
+
+// Для bits[5:4]
+func (p *SensorData) GetPriority() uint8
+func (p *SensorData) SetPriority(val uint8)
 ```
 
 ### Константы смещений
@@ -221,51 +212,84 @@ func (p *SensorData) SetAck(val bool)
 ```go
 const SensorData_Device_id_Offset = 0
 const SensorData_Device_id_Size   = 4
-const SensorData_Flags_Offset     = 17
+const SensorData_Flags_Offset     = 8
 const SensorData_Flags_Size       = 1
+// Для динамических полей смещение не вычисляется
 ```
 
-## Демонстрация
+## Примеры
 
-Запустите готовый демонстрационный пример:
+| Пример | Описание |
+|--------|----------|
+| `examples/simple/` | Базовые типы и структуры |
+| `examples/bitfields/` | Битовые поля и DNS флаги |
+| `examples/arrays/` | Слайсы с полем длины |
+| `examples/dns/` | DNS протокол |
+| `demo/run.go` | Автономное демо сенсора |
 
+Запуск демо:
 ```bash
-make demo
+make demo          # базовый сенсор
+make demo-arrays   # слайсы
+make demo-dns      # DNS протокол
 ```
 
-Демо показывает:
-- Создание структуры с тестовыми данными
-- Установку битовых флагов
-- Сериализацию в бинарный формат с разбором по байтам
-- Десериализацию и проверку корректности
-- Сгенерированные константы смещений
+## Статус проекта
+
+### Реализовано
+- Все скалярные типы
+- Вложенные структуры
+- Битовые поля (`bitstruct` с `bit()` и `bits[high:low]`)
+- Поля `bytes` с `length_from`
+- Слайсы `[]type` и `[]struct` с полем `length`
+- Условные поля (`if`)
+- BigEndian кодирование
+- Константы смещений
+- Модульные тесты (11 тестов)
+- Интеграционные тесты
+- Демонстрация
 
 ## Структура проекта
 
 ```
 .
-├── cmd/protoc-gen-go/          # CLI
+├── cmd/protoc-gen-go/     # CLI
 ├── internal/
-│   ├── ast/                    # определения AST
-│   ├── dsl/                    # парсер DSL
-│   └── generator/              # генератор Go-кода
-├── pkg/protocol/               # runtime-функции
-├── examples/                   # примеры DSL
-│   ├── simple/                 # простые примеры
-│   └── bitfields/              # примеры битовых полей
-├── demo/                       # демонстрационная программа
-│   └── run.go                  # автономное демо
-├── testdata/                   # данные для тестов
+│   ├── ast/               # AST определения
+│   ├── dsl/               # парсер DSL
+│   └── generator/         # генератор Go-кода
+├── pkg/protocol/          # runtime
+├── examples/              # примеры DSL
+│   ├── simple/            # базовые примеры
+│   ├── bitfields/         # битовые поля
+│   ├── arrays/            # слайсы
+│   └── dns/               # DNS протокол
+├── demo/                  # демонстрация
+├── testdata/              # интеграционные тесты
 ├── Makefile
 ├── go.mod
 ├── LICENSE
 └── README.md
 ```
 
-## Что планируется
+## Разработка
 
-- Массивы фиксированной длины
-- Диапазоны битов `bits(старший, младший)`
-- Опциональная поддержка Little Endian
-- Валидация значений на этапе сериализации
-- Компактное бинарное представление схемы протокола
+### Требования
+- Go 1.21+
+
+### Запуск тестов
+```bash
+make test              # модульные тесты
+make test-integration  # интеграционные тесты
+make test-all          # все тесты
+```
+
+### Сборка
+```bash
+make build         # собрать бинарник
+make install       # установить в $GOPATH/bin
+```
+
+## Лицензия
+
+MIT. Полный текст см. в файле [LICENSE](LICENSE).

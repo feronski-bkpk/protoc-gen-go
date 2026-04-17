@@ -42,8 +42,10 @@ help:
 	@echo ""
 	@echo "Примеры:"
 	@echo "  make build          # Собрать бинарный файл"
-	@echo "  make test           # Запустить тесты"
+	@echo "  make test           # Запустить модульные тесты"
+	@echo "  make test-all       # Запустить все тесты"
 	@echo "  make demo           # Запустить демонстрацию"
+	@echo "  make demo-arrays    # Запустить демо слайсов"
 	@echo "  make install        # Установить в GOPATH/bin"
 
 .PHONY: deps
@@ -145,13 +147,32 @@ install: build ## Установить бинарный файл в GOPATH/bin
 	@echo "Установлено в GOPATH/bin"
 
 .PHONY: demo
-demo: ## Запустить демонстрацию возможностей
+demo: ## Запустить демонстрацию
 	@echo "================================================"
 	@echo "         ДЕМОНСТРАЦИЯ PROTOCOL-GEN-GO           "
 	@echo "================================================"
 	@echo ""
-	@echo "Запуск демо..."
 	@cd demo && $(GOCMD) run run.go
+	@echo ""
+	@echo "================================================"
+
+.PHONY: demo-arrays
+demo-arrays: ## Запустить демонстрацию слайсов
+	@echo "================================================"
+	@echo "         ДЕМОНСТРАЦИЯ СЛАЙСОВ                   "
+	@echo "================================================"
+	@echo ""
+	@$(GOCMD) run examples/arrays/slice_full_demo.go
+	@echo ""
+	@echo "================================================"
+
+.PHONY: demo-dns
+demo-dns: ## Запустить демонстрацию DNS
+	@echo "================================================"
+	@echo "         ДЕМОНСТРАЦИЯ DNS                       "
+	@echo "================================================"
+	@echo ""
+	@$(GOCMD) run examples/dns/dns_complete.go
 	@echo ""
 	@echo "================================================"
 
@@ -178,7 +199,7 @@ version: ## Показать версию
 	@echo "$(VERSION)"
 
 .PHONY: tag
-tag: ## Создать и отправить git тег (использование: make tag VERSION=v1.0.0)
+tag: ## Создать и отправить git тег (использование: make tag V=v1.0.0)
 	@[ -n "$(V)" ] || { echo "Использование: make tag V=v1.0.0"; exit 1; }
 	@git tag -a $(V) -m "Релиз $(V)"
 	@git push origin $(V)

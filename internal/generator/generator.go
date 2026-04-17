@@ -24,7 +24,6 @@ func (g *Generator) Generate() (string, error) {
 	buf.WriteString("package protocol\n\n")
 
 	needsBinary, needsMath := g.checkNeededImports(g.proto.Fields)
-
 	if needsBinary || needsMath {
 		buf.WriteString("import (\n")
 		if needsBinary {
@@ -60,7 +59,6 @@ func (g *Generator) Generate() (string, error) {
 func (g *Generator) checkNeededImports(fields []ast.Field) (bool, bool) {
 	needsBinary := false
 	needsMath := false
-
 	for _, field := range fields {
 		switch f := field.(type) {
 		case *ast.ScalarField:
@@ -75,11 +73,12 @@ func (g *Generator) checkNeededImports(fields []ast.Field) (bool, bool) {
 			b, m := g.checkNeededImports(f.Struct.Fields)
 			needsBinary = needsBinary || b
 			needsMath = needsMath || m
-		case *ast.BitStructField:
-			needsBinary = true
+		case *ast.ArrayField:
+			b, m := g.checkNeededImports([]ast.Field{f.ElementType})
+			needsBinary = needsBinary || b
+			needsMath = needsMath || m
 		}
 	}
-
 	return needsBinary, needsMath
 }
 
@@ -90,7 +89,6 @@ type structInfo struct {
 
 func (g *Generator) collectNestedStructs(fields []ast.Field) []structInfo {
 	var structs []structInfo
-
 	for _, field := range fields {
 		if structField, ok := field.(*ast.StructField); ok {
 			structs = append(structs, structInfo{
@@ -99,8 +97,25 @@ func (g *Generator) collectNestedStructs(fields []ast.Field) []structInfo {
 			})
 			structs = append(structs, g.collectNestedStructs(structField.Struct.Fields)...)
 		}
+		if arrayField, ok := field.(*ast.ArrayField); ok {
+			if elemStruct, ok := arrayField.ElementType.(*ast.StructField); ok {
+				name := capitalize(arrayField.Name) + "Elem"
+				found := false
+				for _, s := range structs {
+					if s.Name == name {
+						found = true
+						break
+					}
+				}
+				if !found {
+					structs = append(structs, structInfo{
+						Name:   name,
+						Fields: elemStruct.Struct.Fields,
+					})
+				}
+			}
+		}
 	}
-
 	return structs
 }
 
@@ -108,7 +123,6 @@ func (g *Generator) generateStructDef(name string, fields []ast.Field) (string, 
 	var buf bytes.Buffer
 
 	buf.WriteString(fmt.Sprintf("type %s struct {\n", name))
-
 	for _, field := range fields {
 		fieldCode, err := g.fieldToGo(field)
 		if err != nil {
@@ -116,7 +130,6 @@ func (g *Generator) generateStructDef(name string, fields []ast.Field) (string, 
 		}
 		buf.WriteString("    " + fieldCode + "\n")
 	}
-
 	buf.WriteString("}\n\n")
 
 	buf.WriteString(g.generateSizeMethod(name, fields))
@@ -138,20 +151,28 @@ func (g *Generator) generateBitFieldMethods(structName string, field *ast.BitStr
 
 	for _, bit := range field.Fields {
 		methodName := capitalize(bit.Name)
-
-		buf.WriteString(fmt.Sprintf("func (p *%s) Get%s() bool {\n", structName, methodName))
-		buf.WriteString(fmt.Sprintf("    return (p.%s & (1 << %d)) != 0\n", fieldName, bit.Bit))
-		buf.WriteString("}\n\n")
-
-		buf.WriteString(fmt.Sprintf("func (p *%s) Set%s(val bool) {\n", structName, methodName))
-		buf.WriteString("    if val {\n")
-		buf.WriteString(fmt.Sprintf("        p.%s |= (1 << %d)\n", fieldName, bit.Bit))
-		buf.WriteString("    } else {\n")
-		buf.WriteString(fmt.Sprintf("        p.%s &^= (1 << %d)\n", fieldName, bit.Bit))
-		buf.WriteString("    }\n")
-		buf.WriteString("}\n\n")
+		if bit.IsRange {
+			mask := (1 << (bit.HighBit - bit.LowBit + 1)) - 1
+			buf.WriteString(fmt.Sprintf("func (p *%s) Get%s() uint8 {\n", structName, methodName))
+			buf.WriteString(fmt.Sprintf("    return (p.%s >> %d) & 0x%02X\n", fieldName, bit.LowBit, mask))
+			buf.WriteString("}\n\n")
+			buf.WriteString(fmt.Sprintf("func (p *%s) Set%s(val uint8) {\n", structName, methodName))
+			buf.WriteString(fmt.Sprintf("    mask := uint8(0x%02X) << %d\n", mask, bit.LowBit))
+			buf.WriteString(fmt.Sprintf("    p.%s = (p.%s & ^mask) | ((val & 0x%02X) << %d)\n", fieldName, fieldName, mask, bit.LowBit))
+			buf.WriteString("}\n\n")
+		} else {
+			buf.WriteString(fmt.Sprintf("func (p *%s) Get%s() bool {\n", structName, methodName))
+			buf.WriteString(fmt.Sprintf("    return (p.%s & (1 << %d)) != 0\n", fieldName, bit.Bit))
+			buf.WriteString("}\n\n")
+			buf.WriteString(fmt.Sprintf("func (p *%s) Set%s(val bool) {\n", structName, methodName))
+			buf.WriteString("    if val {\n")
+			buf.WriteString(fmt.Sprintf("        p.%s |= (1 << %d)\n", fieldName, bit.Bit))
+			buf.WriteString("    } else {\n")
+			buf.WriteString(fmt.Sprintf("        p.%s &^= (1 << %d)\n", fieldName, bit.Bit))
+			buf.WriteString("    }\n")
+			buf.WriteString("}\n\n")
+		}
 	}
-
 	return buf.String()
 }
 
@@ -162,12 +183,33 @@ func (g *Generator) fieldToGo(field ast.Field) (string, error) {
 	case *ast.StructField:
 		return fmt.Sprintf("%s %s", capitalize(f.Name), capitalize(f.Name)), nil
 	case *ast.BitStructField:
-		return fmt.Sprintf("%s uint8 // bitstruct", capitalize(f.Name)), nil
+		return fmt.Sprintf("%s uint8", capitalize(f.Name)), nil
 	case *ast.BytesField:
 		return fmt.Sprintf("%s []byte", capitalize(f.Name)), nil
-	default:
-		return "", fmt.Errorf("неподдерживаемый тип: %T", field)
+	case *ast.ArrayField:
+		var elemType string
+		switch elem := f.ElementType.(type) {
+		case *ast.ScalarField:
+			elemType = scalarToGoType(elem.Type)
+		case *ast.StructField:
+			elemType = capitalize(f.Name) + "Elem"
+		}
+		if f.FixedLength > 0 {
+			return fmt.Sprintf("%s [%d]%s", capitalize(f.Name), f.FixedLength, elemType), nil
+		}
+		return fmt.Sprintf("%s []%s", capitalize(f.Name), elemType), nil
 	}
+	return "", fmt.Errorf("unsupported type: %T", field)
+}
+
+func (g *Generator) sliceTypeName(field *ast.ArrayField) string {
+	switch elem := field.ElementType.(type) {
+	case *ast.ScalarField:
+		return "[]" + scalarToGoType(elem.Type)
+	case *ast.StructField:
+		return "[]" + capitalize(field.Name) + "Elem"
+	}
+	return "[]interface{}"
 }
 
 func (g *Generator) generateOffsets(prefix string, fields []ast.Field, parentPath string, baseOffset int) string {
@@ -184,31 +226,38 @@ func (g *Generator) generateOffsets(prefix string, fields []ast.Field, parentPat
 			buf.WriteString(fmt.Sprintf("const %s_%s_Offset = %d\n", prefix, fieldPath, offset))
 			buf.WriteString(fmt.Sprintf("const %s_%s_Size = %d\n\n", prefix, fieldPath, size))
 			offset += size
-
 		case *ast.StructField:
 			buf.WriteString(g.generateOffsets(prefix, f.Struct.Fields, fieldPath+"_", offset))
 			structSize := g.calculateStructSize(f.Struct.Fields)
 			buf.WriteString(fmt.Sprintf("const %s_%s_Offset = %d\n", prefix, fieldPath, offset))
 			buf.WriteString(fmt.Sprintf("const %s_%s_Size = %d\n\n", prefix, fieldPath, structSize))
 			offset += structSize
-
 		case *ast.BitStructField:
 			buf.WriteString(fmt.Sprintf("const %s_%s_Offset = %d\n", prefix, fieldPath, offset))
 			buf.WriteString(fmt.Sprintf("const %s_%s_Size = 1\n\n", prefix, fieldPath))
 			offset += 1
-
+		case *ast.ArrayField:
+			buf.WriteString(fmt.Sprintf("// %s_%s has dynamic offset\n", prefix, fieldPath))
 		case *ast.BytesField:
 			buf.WriteString(fmt.Sprintf("// %s_%s has dynamic offset\n", prefix, fieldPath))
 		}
 	}
-
 	return buf.String()
 }
 
 func (g *Generator) calculateStructSize(fields []ast.Field) int {
 	size := 0
 	for _, field := range fields {
-		size += field.GetSize()
+		switch f := field.(type) {
+		case *ast.ScalarField:
+			size += f.Type.Size()
+		case *ast.StructField:
+			size += g.calculateStructSize(f.Struct.Fields)
+		case *ast.BitStructField:
+			size += 1
+		case *ast.ArrayField:
+		case *ast.BytesField:
+		}
 	}
 	return size
 }
@@ -228,7 +277,20 @@ func (g *Generator) generateSizeMethod(structName string, fields []ast.Field) st
 		case *ast.StructField:
 			buf.WriteString(fmt.Sprintf("    size += p.%s.Size()\n", fieldName))
 		case *ast.BitStructField:
-			buf.WriteString(fmt.Sprintf("    size += 1 // %s (bitstruct)\n", fieldName))
+			buf.WriteString(fmt.Sprintf("    size += 1 // %s\n", fieldName))
+		case *ast.ArrayField:
+			if f.FixedLength > 0 {
+				elemSize := f.ElementType.GetSize()
+				buf.WriteString(fmt.Sprintf("    size += %d * %d // %s\n", f.FixedLength, elemSize, fieldName))
+			} else {
+				buf.WriteString(fmt.Sprintf("    for i := range p.%s {\n", fieldName))
+				if _, ok := f.ElementType.(*ast.ScalarField); ok {
+					buf.WriteString(fmt.Sprintf("        size += %d\n", f.ElementType.GetSize()))
+				} else {
+					buf.WriteString(fmt.Sprintf("        size += p.%s[i].Size()\n", fieldName))
+				}
+				buf.WriteString("    }\n")
+			}
 		case *ast.BytesField:
 			if f.Condition != nil {
 				buf.WriteString(fmt.Sprintf("    if %s {\n", g.conditionToGo(f.Condition)))
@@ -239,10 +301,8 @@ func (g *Generator) generateSizeMethod(structName string, fields []ast.Field) st
 			}
 		}
 	}
-
 	buf.WriteString("    return size\n")
 	buf.WriteString("}\n\n")
-
 	return buf.String()
 }
 
@@ -267,6 +327,30 @@ func (g *Generator) generateMarshalMethod(structName string, fields []ast.Field)
 		case *ast.BitStructField:
 			buf.WriteString(fmt.Sprintf("    buf[offset] = p.%s\n", fieldName))
 			buf.WriteString("    offset += 1\n\n")
+		case *ast.ArrayField:
+			if f.FixedLength > 0 {
+				buf.WriteString(fmt.Sprintf("    for i := 0; i < %d; i++ {\n", f.FixedLength))
+				if _, ok := f.ElementType.(*ast.ScalarField); ok {
+					buf.WriteString(fmt.Sprintf("        %s", g.generateMarshalScalar(fmt.Sprintf("%s[i]", fieldName), f.ElementType.(*ast.ScalarField).Type)))
+				} else {
+					buf.WriteString(fmt.Sprintf("        data, err := p.%s[i].MarshalBinary()\n", fieldName))
+					buf.WriteString("        if err != nil {\n            return nil, err\n        }\n")
+					buf.WriteString("        copy(buf[offset:], data)\n")
+					buf.WriteString("        offset += len(data)\n")
+				}
+				buf.WriteString("    }\n\n")
+			} else {
+				buf.WriteString(fmt.Sprintf("    for i := range p.%s {\n", fieldName))
+				if _, ok := f.ElementType.(*ast.ScalarField); ok {
+					buf.WriteString(fmt.Sprintf("        %s", g.generateMarshalScalar(fmt.Sprintf("%s[i]", fieldName), f.ElementType.(*ast.ScalarField).Type)))
+				} else {
+					buf.WriteString(fmt.Sprintf("        data, err := p.%s[i].MarshalBinary()\n", fieldName))
+					buf.WriteString("        if err != nil {\n            return nil, err\n        }\n")
+					buf.WriteString("        copy(buf[offset:], data)\n")
+					buf.WriteString("        offset += len(data)\n")
+				}
+				buf.WriteString("    }\n\n")
+			}
 		case *ast.BytesField:
 			if f.Condition != nil {
 				buf.WriteString(fmt.Sprintf("    if %s {\n", g.conditionToGo(f.Condition)))
@@ -279,16 +363,13 @@ func (g *Generator) generateMarshalMethod(structName string, fields []ast.Field)
 			}
 		}
 	}
-
 	buf.WriteString("    return buf, nil\n")
 	buf.WriteString("}\n\n")
-
 	return buf.String()
 }
 
 func (g *Generator) generateMarshalScalar(fieldName string, scalarType ast.ScalarType) string {
 	var buf bytes.Buffer
-
 	switch scalarType {
 	case ast.UINT8, ast.INT8:
 		buf.WriteString(fmt.Sprintf("    buf[offset] = byte(p.%s)\n", fieldName))
@@ -318,7 +399,6 @@ func (g *Generator) generateMarshalScalar(fieldName string, scalarType ast.Scala
 		buf.WriteString(fmt.Sprintf("    binary.BigEndian.PutUint64(buf[offset:], math.Float64bits(p.%s))\n", fieldName))
 		buf.WriteString("    offset += 8\n\n")
 	}
-
 	return buf.String()
 }
 
@@ -335,11 +415,25 @@ func (g *Generator) generateUnmarshalMethod(structName string, fields []ast.Fiel
 		case *ast.ScalarField:
 			buf.WriteString(g.generateUnmarshalScalar(fieldName, f.Type))
 		case *ast.StructField:
-			buf.WriteString(fmt.Sprintf("    if err := p.%s.UnmarshalBinary(data[offset:]); err != nil {\n        return err\n    }\n", fieldName))
+			buf.WriteString(fmt.Sprintf("    if err := p.%s.UnmarshalBinary(data[offset:]); err != nil {\n", fieldName))
+			buf.WriteString("        return err\n    }\n")
 			buf.WriteString(fmt.Sprintf("    offset += p.%s.Size()\n\n", fieldName))
 		case *ast.BitStructField:
 			buf.WriteString(fmt.Sprintf("    p.%s = data[offset]\n", fieldName))
 			buf.WriteString("    offset += 1\n\n")
+		case *ast.ArrayField:
+			if f.FixedLength > 0 {
+				buf.WriteString(fmt.Sprintf("    for i := 0; i < %d; i++ {\n", f.FixedLength))
+				if _, ok := f.ElementType.(*ast.ScalarField); ok {
+					buf.WriteString(fmt.Sprintf("        %s", g.generateUnmarshalScalar(fmt.Sprintf("%s[i]", fieldName), f.ElementType.(*ast.ScalarField).Type)))
+				} else {
+					buf.WriteString(fmt.Sprintf("        if err := p.%s[i].UnmarshalBinary(data[offset:]); err != nil {\n", fieldName))
+					buf.WriteString("            return err\n        }\n")
+					buf.WriteString(fmt.Sprintf("        offset += p.%s[i].Size()\n", fieldName))
+				}
+				buf.WriteString("    }\n\n")
+			} else if f.LengthFrom != "" {
+			}
 		case *ast.BytesField:
 			if f.Condition != nil {
 				buf.WriteString(fmt.Sprintf("    if %s {\n", g.conditionToGo(f.Condition)))
@@ -360,16 +454,13 @@ func (g *Generator) generateUnmarshalMethod(structName string, fields []ast.Fiel
 			}
 		}
 	}
-
 	buf.WriteString("    return nil\n")
 	buf.WriteString("}\n\n")
-
 	return buf.String()
 }
 
 func (g *Generator) generateUnmarshalScalar(fieldName string, scalarType ast.ScalarType) string {
 	var buf bytes.Buffer
-
 	switch scalarType {
 	case ast.UINT8:
 		buf.WriteString(fmt.Sprintf("    p.%s = data[offset]\n", fieldName))
@@ -402,7 +493,6 @@ func (g *Generator) generateUnmarshalScalar(fieldName string, scalarType ast.Sca
 		buf.WriteString(fmt.Sprintf("    p.%s = math.Float64frombits(binary.BigEndian.Uint64(data[offset:]))\n", fieldName))
 		buf.WriteString("    offset += 8\n\n")
 	}
-
 	return buf.String()
 }
 

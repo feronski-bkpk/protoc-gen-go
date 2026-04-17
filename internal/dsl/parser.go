@@ -13,13 +13,14 @@ import (
 
 var (
 	dslLexer = lexer.MustSimple([]lexer.SimpleRule{
-		{Name: "Keyword", Pattern: `protocol|struct|bitstruct|id|if|length_from|bit`},
-		{Name: "Ident", Pattern: `[a-zA-Z_][a-zA-Z0-9_]*`},
+		{Name: "Keyword", Pattern: `protocol|struct|bitstruct|id|if|length_from|length|repeated`},
+		{Name: "Slice", Pattern: `\[\]`},
 		{Name: "Type", Pattern: `uint8|uint16|uint32|uint64|int8|int16|int32|int64|float32|float64|bytes`},
+		{Name: "Ident", Pattern: `[a-zA-Z_][a-zA-Z0-9_]*`},
 		{Name: "HexNumber", Pattern: `0x[0-9a-fA-F]+`},
 		{Name: "Number", Pattern: `\d+`},
 		{Name: "Operator", Pattern: `==|!=|<=|>=|<|>`},
-		{Name: "Punct", Pattern: `[(){}\[\]:;]`},
+		{Name: "Punct", Pattern: `[(){}\[\]:;,]`},
 		{Name: "Comment", Pattern: `//[^\n]*`},
 		{Name: "Whitespace", Pattern: `\s+`},
 	})
@@ -90,10 +91,15 @@ func (p *Protocol) ToAST() (*ast.Protocol, error) {
 }
 
 type Field struct {
-	Name       string     `parser:"@Ident ':'"`
-	Type       *FieldType `parser:"@@"`
-	LengthFrom *string    `parser:"( 'length_from' ':' @Ident )?"`
-	Condition  *Condition `parser:"( 'if' @@ )?"`
+	Name      string     `parser:"@Ident ':'"`
+	Type      *FieldType `parser:"@@"`
+	LengthOpt *LengthOpt `parser:"@@?"`
+	Condition *Condition `parser:"( 'if' @@ )?"`
+}
+
+type LengthOpt struct {
+	LengthFrom *string `parser:"( 'length_from' ':' @Ident )"`
+	Length     *string `parser:"| ( 'length' ':' @Ident )"`
 }
 
 func (f *Field) ToAST() (ast.Field, error) {
@@ -107,8 +113,12 @@ func (f *Field) ToAST() (ast.Field, error) {
 	}
 
 	lengthFrom := ""
-	if f.LengthFrom != nil {
-		lengthFrom = *f.LengthFrom
+	if f.LengthOpt != nil {
+		if f.LengthOpt.LengthFrom != nil {
+			lengthFrom = *f.LengthOpt.LengthFrom
+		} else if f.LengthOpt.Length != nil {
+			lengthFrom = *f.LengthOpt.Length
+		}
 	}
 
 	if f.Type.Scalar != nil {
@@ -130,7 +140,6 @@ func (f *Field) ToAST() (ast.Field, error) {
 				fields = append(fields, field)
 			}
 		}
-
 		return &ast.StructField{
 			Name:      f.Name,
 			Struct:    &ast.StructType{Fields: fields},
@@ -141,14 +150,11 @@ func (f *Field) ToAST() (ast.Field, error) {
 	if f.Type.BitStruct != nil {
 		bitFields := make([]*ast.BitFieldSpec, 0)
 		for _, bf := range f.Type.BitStruct.Fields {
-
-			bitFields = append(bitFields, &ast.BitFieldSpec{
-				Name:    bf.Name,
-				Bit:     bf.Bit,
-				IsRange: false,
-			})
+			spec := bf.ToAST()
+			if spec != nil {
+				bitFields = append(bitFields, spec)
+			}
 		}
-
 		return &ast.BitStructField{
 			Name:      f.Name,
 			Fields:    bitFields,
@@ -164,14 +170,100 @@ func (f *Field) ToAST() (ast.Field, error) {
 		}, nil
 	}
 
+	if f.Type.SliceScalar != nil {
+		elemField := &ast.ScalarField{
+			Type: ast.ScalarType(*f.Type.SliceScalar),
+		}
+		return &ast.ArrayField{
+			Name:        f.Name,
+			ElementType: elemField,
+			FixedLength: 0,
+			LengthFrom:  lengthFrom,
+			Condition:   condition,
+		}, nil
+	}
+
+	if f.Type.SliceStruct != nil {
+		fields := make([]ast.Field, 0)
+		for _, sf := range f.Type.SliceStruct.Body {
+			field, err := sf.ToAST()
+			if err != nil {
+				return nil, err
+			}
+			if field != nil {
+				fields = append(fields, field)
+			}
+		}
+		elemField := &ast.StructField{
+			Struct: &ast.StructType{Fields: fields},
+		}
+		return &ast.ArrayField{
+			Name:        f.Name,
+			ElementType: elemField,
+			FixedLength: 0,
+			LengthFrom:  lengthFrom,
+			Condition:   condition,
+		}, nil
+	}
+
+	if f.Type.Repeated != nil && f.Type.RepeatedLength != nil {
+		if f.Type.Repeated.Scalar != "" {
+			elemField := &ast.ScalarField{
+				Type: ast.ScalarType(f.Type.Repeated.Scalar),
+			}
+			return &ast.ArrayField{
+				Name:        f.Name,
+				ElementType: elemField,
+				FixedLength: *f.Type.RepeatedLength,
+				Condition:   condition,
+			}, nil
+		}
+		if f.Type.Repeated.Struct != nil {
+			fields := make([]ast.Field, 0)
+			for _, sf := range f.Type.Repeated.Struct.Body {
+				field, err := sf.ToAST()
+				if err != nil {
+					return nil, err
+				}
+				if field != nil {
+					fields = append(fields, field)
+				}
+			}
+			elemField := &ast.StructField{
+				Struct: &ast.StructType{Fields: fields},
+			}
+			return &ast.ArrayField{
+				Name:        f.Name,
+				ElementType: elemField,
+				FixedLength: *f.Type.RepeatedLength,
+				Condition:   condition,
+			}, nil
+		}
+	}
+
 	return nil, nil
 }
 
 type FieldType struct {
-	Scalar    *string       `parser:"  @('uint8'|'uint16'|'uint32'|'uint64'|'int8'|'int16'|'int32'|'int64'|'float32'|'float64')"`
-	Struct    *Struct       `parser:"| 'struct' @@"`
-	BitStruct *BitStructDef `parser:"| 'bitstruct' @@"`
-	Bytes     bool          `parser:"| @'bytes'"`
+	Scalar         *string       `parser:"  @('uint8'|'uint16'|'uint32'|'uint64'|'int8'|'int16'|'int32'|'int64'|'float32'|'float64')"`
+	Struct         *Struct       `parser:"| 'struct' @@"`
+	BitStruct      *BitStructDef `parser:"| 'bitstruct' @@"`
+	Bytes          bool          `parser:"| @'bytes'"`
+	SliceScalar    *string       `parser:"| '[]' @('uint8'|'uint16'|'uint32'|'uint64'|'int8'|'int16'|'int32'|'int64'|'float32'|'float64')"`
+	SliceStruct    *SliceStruct  `parser:"| '[]' 'struct' @@"`
+	Repeated       *RepeatedDef  `parser:"| 'repeated' @@ 'length' ':' @Number"`
+	RepeatedLength *int          `parser:""`
+}
+
+type RepeatedDef struct {
+	Scalar string  `parser:"  @('uint8'|'uint16'|'uint32'|'uint64'|'int8'|'int16'|'int32'|'int64'|'float32'|'float64')"`
+	Struct *Struct `parser:"| 'struct' @@"`
+}
+
+func (r *RepeatedDef) Capture(values []string) error { return nil }
+
+type SliceStruct struct {
+	Body []*Field `parser:"'{' @@* '}'"`
 }
 
 type Struct struct {
@@ -183,9 +275,36 @@ type BitStructDef struct {
 }
 
 type BitFieldDef struct {
-	Name string `parser:"@Ident ':' 'bit' '('"`
-	Bit  int    `parser:"@Number"`
-	End  string `parser:"')'"`
+	Name string      `parser:"@Ident ':'"`
+	Spec *BitSpecDef `parser:"@@"`
+}
+
+type BitSpecDef struct {
+	BitsHi *int `parser:"  'bits' '[' @Number"`
+	BitsLo *int `parser:"  ':' @Number ']'"`
+	Bit    *int `parser:"| 'bit' '(' @Number ')'"`
+}
+
+func (b *BitFieldDef) ToAST() *ast.BitFieldSpec {
+	if b.Spec == nil {
+		return nil
+	}
+	if b.Spec.BitsHi != nil && b.Spec.BitsLo != nil {
+		return &ast.BitFieldSpec{
+			Name:    b.Name,
+			HighBit: *b.Spec.BitsHi,
+			LowBit:  *b.Spec.BitsLo,
+			IsRange: true,
+		}
+	}
+	if b.Spec.Bit != nil {
+		return &ast.BitFieldSpec{
+			Name:    b.Name,
+			Bit:     *b.Spec.Bit,
+			IsRange: false,
+		}
+	}
+	return nil
 }
 
 type Condition struct {
@@ -198,20 +317,16 @@ func (c *Condition) ToAST() (*ast.Condition, error) {
 	if c == nil {
 		return nil, nil
 	}
-
 	var val uint64
 	var err error
-
 	if strings.HasPrefix(c.Value, "0x") {
 		val, err = strconv.ParseUint(c.Value[2:], 16, 64)
 	} else {
 		val, err = strconv.ParseUint(c.Value, 10, 64)
 	}
-
 	if err != nil {
 		return nil, fmt.Errorf("invalid condition value: %s", c.Value)
 	}
-
 	return &ast.Condition{
 		Field:    c.Field,
 		Operator: c.Op,
