@@ -9,8 +9,8 @@ import (
 
 	"github.com/feronski-bkpk/protoc-gen-go/internal/analyzer"
 	"github.com/feronski-bkpk/protoc-gen-go/internal/ast"
-	"github.com/feronski-bkpk/protoc-gen-go/internal/dsl"
 	"github.com/feronski-bkpk/protoc-gen-go/internal/generator"
+	"github.com/feronski-bkpk/protoc-gen-go/internal/parser"
 )
 
 var (
@@ -41,7 +41,6 @@ func main() {
 	}
 
 	fmt.Printf("Парсинг %s...\n", filename)
-	parser := dsl.NewParser()
 	proto, err := parser.ParseFile(filename)
 	if err != nil {
 		log.Fatalf("Ошибка парсинга %s: %v", filename, err)
@@ -150,6 +149,9 @@ func printFields(fields []ast.Field, indent int) {
 				fmt.Printf("%s", elem.Type)
 			case *ast.StructField:
 				fmt.Printf("struct")
+			}
+			if f.LengthFrom != "" {
+				fmt.Printf(" (длина из: %s)", f.LengthFrom)
 			}
 			if f.Condition != nil {
 				fmt.Printf(" [если %s %s %d]", f.Condition.Field, f.Condition.Operator, f.Condition.Value)

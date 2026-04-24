@@ -1,6 +1,6 @@
 # protoc-gen-go
 
-Генератор Go-кода для бинарных протоколов, описанных в человеко-читаемом DSL.
+Генератор Go-кода для бинарных протоколов из человеко-читаемого DSL.
 
 [![Go Version](https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat&logo=go)](https://go.dev/)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -9,20 +9,23 @@
 
 Инструмент позволяет:
 
-- описать бинарный протокол в декларативном текстовом формате (DSL);
-- автоматически получить строго типизированные Go-структуры;
-- сгенерировать методы `MarshalBinary` / `UnmarshalBinary` / `Size`;
-- получить константы смещений для отладки и прямого доступа к полям.
+- описать бинарный протокол в декларативном текстовом формате (DSL)
+- автоматически получить строго типизированные Go-структуры
+- сгенерировать методы `MarshalBinary` / `UnmarshalBinary` / `Size`
+- получить константы смещений для отладки и прямого доступа к полям
 
-Проект ориентирован на случаи, где важен **фиксированный бинарный формат**:
-встраиваемые системы, сетевые протоколы, драйверы, компактное межсервисное взаимодействие.
+**Не требует внешних зависимостей** — только стандартная библиотека Go.
 
 ## Принцип работы
 
-1. Пользователь описывает протокол в файле `.dsl`.
-2. Парсер (на базе `participle`) строит AST.
-3. Генератор создаёт Go-файл со структурами и методами сериализации.
-4. Сгенерированный код не требует внешних зависимостей (только стандартная библиотека).
+```
+DSL (.dsl) → Собственный парсер → AST → Анализатор → Генератор → Go-код (.gen.go)
+```
+
+1. Пользователь описывает протокол в файле `.dsl`
+2. Собственный парсер (Recursive Descent) строит AST
+3. Анализатор проверяет семантику и строит таблицу символов
+4. Генератор создаёт Go-файл со структурами и методами сериализации
 
 Порядок байт — **Big Endian** (сетевой порядок).
 
@@ -38,7 +41,6 @@ make install
 ## Быстрый старт
 
 ```bash
-# Создайте DSL файл
 cat > sensor.dsl << 'EOF'
 protocol SensorData {
     id: 0xABCD
@@ -56,10 +58,7 @@ protocol SensorData {
 }
 EOF
 
-# Сгенерируйте код
 protoc-gen-go sensor.dsl
-
-# Используйте в проекте
 ```
 
 ## Использование
@@ -70,24 +69,23 @@ protoc-gen-go sensor.dsl
 protoc-gen-go <файл.dsl>
 ```
 
-После выполнения будет создан файл `<имя_файла>.gen.go` в той же директории.
+Создаёт `<имя_файла>.gen.go` в той же директории.
 
 ### Makefile
 
 | Команда | Назначение |
 |---------|------------|
 | `make build` | собрать бинарный файл |
-| `make test` | модульные тесты |
-| `make test-integration` | интеграционные тесты |
-| `make test-all` | все тесты |
+| `make test` | запустить все тесты |
+| `make test-parser` | тесты парсера |
+| `make test-analyzer` | тесты анализатора |
 | `make demo` | демонстрация базового протокола |
 | `make demo-arrays` | демонстрация слайсов |
-| `make demo-dns` | демонстрация DNS протокола |
+| `make demo-dns` | демонстрация DNS |
 | `make clean` | удалить артефакты |
 | `make fmt` | форматировать код |
 | `make lint` | запустить go vet |
 | `make install` | установить в `$GOPATH/bin` |
-| `make help` | показать справку |
 
 ## DSL — синтаксис и правила
 
@@ -100,9 +98,6 @@ protocol <ИмяПротокола> {
     ...
 }
 ```
-
-- `<ИмяПротокола>` — допустимый Go-идентификатор.
-- `<HexID>` — идентификатор протокола в шестнадцатеричном виде (например, `0x1234`).
 
 ### Скалярные поля
 
@@ -120,7 +115,6 @@ protocol <ИмяПротокола> {
 flags: bitstruct {
     ack: bit(7)           // одиночный бит → GetAck() bool, SetAck(bool)
     opcode: bits[6:3]     // диапазон 4 бита → GetOpcode() uint8, SetOpcode(uint8)
-    reserved: bits[2:0]   // диапазон 3 бита → GetReserved() uint8, SetReserved(uint8)
 }
 ```
 
@@ -130,7 +124,6 @@ flags: bitstruct {
 location: struct {
     latitude: float64
     longitude: float64
-    altitude: int32
 }
 ```
 
@@ -141,27 +134,33 @@ name_len: uint16
 name: bytes length_from: name_len
 ```
 
+### Фиксированные массивы
+
+```
+readings: [10]float32
+points: [5]struct {
+    x: float32
+    y: float32
+}
+```
+
 ### Слайсы (массивы переменной длины)
 
 ```
 readings_len: uint16
 readings: []float32 length: readings_len
 
-samples_len: uint8
 samples: []struct {
     x: float32
     y: float32
-    z: float32
 } length: samples_len
 ```
-
-Для слайсов обязательно указывать поле длины через `length: <поле>`.
 
 ### Условные поля
 
 ```
-error_msg: bytes length_from: error_len if flags == 1
-extended: uint32 if flags == 2
+extended: uint32 if flags == 1
+error_msg: bytes length_from: error_len if flags == 2
 ```
 
 Поддерживаемые операторы: `==`, `!=`, `<`, `>`, `<=`, `>=`.
@@ -182,14 +181,13 @@ type SensorData struct {
     Device_id    uint32
     Temperature  float32
     Flags        uint8 // bitstruct
-    Readings_len uint16
-    Readings     []float32
+    Readings     [10]float32
     Name_len     uint16
     Name         []byte
 }
 ```
 
-Для анонимных структур в слайсах создаётся отдельный тип с суффиксом `Elem` (например, `SamplesElem`).
+Для анонимных структур создаётся тип с суффиксом `Elem` (например, `SamplesElem`).
 
 ### Методы
 
@@ -198,13 +196,11 @@ func (p *SensorData) Size() int
 func (p *SensorData) MarshalBinary() ([]byte, error)
 func (p *SensorData) UnmarshalBinary(data []byte) error
 
-// Для bit(7)
+// Для битовых полей
 func (p *SensorData) GetAck() bool
 func (p *SensorData) SetAck(val bool)
-
-// Для bits[5:4]
-func (p *SensorData) GetPriority() uint8
-func (p *SensorData) SetPriority(val uint8)
+func (p *SensorData) GetOpcode() uint8
+func (p *SensorData) SetOpcode(val uint8)
 ```
 
 ### Константы смещений
@@ -212,9 +208,6 @@ func (p *SensorData) SetPriority(val uint8)
 ```go
 const SensorData_Device_id_Offset = 0
 const SensorData_Device_id_Size   = 4
-const SensorData_Flags_Offset     = 8
-const SensorData_Flags_Size       = 1
-// Для динамических полей смещение не вычисляется
 ```
 
 ## Примеры
@@ -223,31 +216,15 @@ const SensorData_Flags_Size       = 1
 |--------|----------|
 | `examples/simple/` | Базовые типы и структуры |
 | `examples/bitfields/` | Битовые поля и DNS флаги |
-| `examples/arrays/` | Слайсы с полем длины |
+| `examples/arrays/` | Массивы и слайсы |
 | `examples/dns/` | DNS протокол |
-| `demo/run.go` | Автономное демо сенсора |
+| `demo/run.go` | Автономное демо |
 
-Запуск демо:
 ```bash
 make demo          # базовый сенсор
 make demo-arrays   # слайсы
 make demo-dns      # DNS протокол
 ```
-
-## Статус проекта
-
-### Реализовано
-- Все скалярные типы
-- Вложенные структуры
-- Битовые поля (`bitstruct` с `bit()` и `bits[high:low]`)
-- Поля `bytes` с `length_from`
-- Слайсы `[]type` и `[]struct` с полем `length`
-- Условные поля (`if`)
-- BigEndian кодирование
-- Константы смещений
-- Модульные тесты (11 тестов)
-- Интеграционные тесты
-- Демонстрация
 
 ## Структура проекта
 
@@ -256,38 +233,50 @@ make demo-dns      # DNS протокол
 ├── cmd/protoc-gen-go/     # CLI
 ├── internal/
 │   ├── ast/               # AST определения
-│   ├── dsl/               # парсер DSL
-│   └── generator/         # генератор Go-кода
-├── pkg/protocol/          # runtime
-├── examples/              # примеры DSL
-│   ├── simple/            # базовые примеры
-│   ├── bitfields/         # битовые поля
-│   ├── arrays/            # слайсы
-│   └── dns/               # DNS протокол
-├── demo/                  # демонстрация
-├── testdata/              # интеграционные тесты
+│   ├── parser/            # Собственный парсер
+│   │   ├── lexer.go       # Лексер
+│   │   ├── token.go       # Токены
+│   │   └── parser.go      # Recursive Descent парсер
+│   ├── analyzer/          # Семантический анализ
+│   └── generator/         # Генератор Go-кода
+├── pkg/protocol/          # Runtime (опционально)
+├── examples/              # Примеры DSL
+├── demo/                  # Демонстрация
+├── testdata/              # Тесты
+├── docs/                  # Документация
+│   ├── grammar.md         # BNF-грамматика
+│   └── parser.md          # Архитектура парсера
 ├── Makefile
 ├── go.mod
 ├── LICENSE
 └── README.md
 ```
 
+## Документация
+
+- [Грамматика DSL](docs/grammar.md) — полная BNF-нотация
+- [Архитектура парсера](docs/parser.md) — описание компонентов
+
 ## Разработка
 
 ### Требования
+
 - Go 1.21+
 
-### Запуск тестов
+### Тесты
+
 ```bash
-make test              # модульные тесты
-make test-integration  # интеграционные тесты
-make test-all          # все тесты
+make test            # все тесты (парсер + анализатор)
+make test-parser     # только парсер
+make test-analyzer   # только анализатор
 ```
 
 ### Сборка
+
 ```bash
-make build         # собрать бинарник
-make install       # установить в $GOPATH/bin
+make build           # собрать бинарник
+make install         # установить в $GOPATH/bin
+make dev             # полная пересборка
 ```
 
 ## Лицензия

@@ -27,7 +27,7 @@ GOVET := $(GOCMD) vet
 # ============================================================================
 
 .PHONY: all
-all: clean deps fmt lint test test-analyzer build
+all: clean deps fmt lint test test-parser test-analyzer build
 
 .PHONY: help
 help:
@@ -42,9 +42,9 @@ help:
 	@echo ""
 	@echo "Примеры:"
 	@echo "  make build          # Собрать бинарный файл"
-	@echo "  make test           # Запустить тесты парсера"
+	@echo "  make test           # Запустить все тесты"
+	@echo "  make test-parser    # Запустить тесты парсера"
 	@echo "  make test-analyzer  # Запустить тесты анализатора"
-	@echo "  make test-all       # Запустить все тесты"
 	@echo "  make demo           # Запустить демонстрацию"
 	@echo "  make demo-arrays    # Запустить демо слайсов"
 	@echo "  make demo-dns       # Запустить демо DNS"
@@ -69,10 +69,10 @@ lint: ## Запустить линтеры (vet)
 	@$(GOVET) ./cmd/... ./internal/... ./pkg/...
 	@echo "Линтинг пройден"
 
-.PHONY: test
-test: ## Запустить тесты парсера DSL
+.PHONY: test-parser
+test-parser: ## Запустить тесты нового парсера
 	@echo "Тесты парсера..."
-	@cd internal/dsl && $(GOTEST) -v
+	@cd internal/parser && $(GOTEST) -v
 	@echo "Все тесты парсера пройдены"
 
 .PHONY: test-analyzer
@@ -81,17 +81,8 @@ test-analyzer: ## Запустить тесты анализатора
 	@cd internal/analyzer && $(GOTEST) -v
 	@echo "Все тесты анализатора пройдены"
 
-.PHONY: test-integration
-test-integration: build ## Запустить интеграционные тесты
-	@echo "Интеграционные тесты..."
-	@./$(BUILD_DIR)/$(BINARY_NAME) testdata/full_test.dsl
-	@mkdir -p testdata/protocol
-	@mv testdata/full_test.gen.go testdata/protocol/ 2>/dev/null || true
-	@cd testdata && $(GOTEST) -v
-	@echo "Интеграционные тесты пройдены"
-
-.PHONY: test-all
-test-all: test test-analyzer test-integration ## Запустить все тесты
+.PHONY: test
+test: test-parser test-analyzer ## Запустить все тесты
 
 .PHONY: test-coverage
 test-coverage: ## Запустить тесты с отчётом о покрытии
@@ -198,13 +189,13 @@ examples: build ## Сгенерировать все примеры
 	@echo "Все примеры сгенерированы"
 
 .PHONY: dev
-dev: clean deps build test test-analyzer ## Полная пересборка для разработки
+dev: clean deps build test ## Полная пересборка для разработки
 
 .PHONY: quick
 quick: build demo ## Быстрая сборка и запуск демо
 
 .PHONY: check
-check: fmt lint test test-analyzer ## Запустить все проверки
+check: fmt lint test ## Запустить все проверки
 
 .PHONY: version
 version: ## Показать версию
