@@ -35,7 +35,30 @@ type Protocol struct {
 	PacketID uint16
 	Fields   []Field
 	Types    map[string]*StructType
+	Enums    map[string]*EnumType
+	Endian   string
 }
+
+type EnumType struct {
+	Name   string
+	Values []*EnumValue
+}
+
+type EnumValue struct {
+	Name  string
+	Value int
+}
+
+type EnumField struct {
+	Name      string
+	EnumName  string
+	Enum      *EnumType
+	Condition *Condition
+}
+
+func (f *EnumField) GetName() string { return f.Name }
+func (f *EnumField) GetType() string { return "enum" }
+func (f *EnumField) GetSize() int    { return 1 }
 
 type Field interface {
 	GetName() string

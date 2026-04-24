@@ -38,6 +38,10 @@ func (g *Generator) Generate() (string, error) {
 		buf.WriteString(")\n\n")
 	}
 
+	if len(g.proto.Enums) > 0 {
+		buf.WriteString(g.generateEnumDefs(g.proto.Enums))
+	}
+
 	nestedStructs := g.collectNestedStructs(g.proto.Fields)
 	for _, structDef := range nestedStructs {
 		structCode, err := g.generateStructDef(structDef.Name, structDef.Fields)
@@ -57,6 +61,22 @@ func (g *Generator) Generate() (string, error) {
 	buf.WriteString(offsetsCode)
 
 	return buf.String(), nil
+}
+
+func (g *Generator) generateEnumDefs(enums map[string]*ast.EnumType) string {
+	var buf bytes.Buffer
+
+	for _, enum := range enums {
+		buf.WriteString(fmt.Sprintf("type %s uint8\n\n", capitalize(enum.Name)))
+		buf.WriteString("const (\n")
+		for _, val := range enum.Values {
+			buf.WriteString(fmt.Sprintf("    %s %s = %d\n",
+				capitalize(val.Name), capitalize(enum.Name), val.Value))
+		}
+		buf.WriteString(")\n\n")
+	}
+
+	return buf.String()
 }
 
 func (g *Generator) checkNeededImports(fields []ast.Field) (bool, bool, bool) {
@@ -202,6 +222,8 @@ func (g *Generator) fieldToGo(field ast.Field) (string, error) {
 		return fmt.Sprintf("%s uint8", capitalize(f.Name)), nil
 	case *ast.BytesField:
 		return fmt.Sprintf("%s []byte", capitalize(f.Name)), nil
+	case *ast.EnumField:
+		return fmt.Sprintf("%s %s", capitalize(f.Name), capitalize(f.EnumName)), nil
 	case *ast.ArrayField:
 		var elemType string
 		switch elem := f.ElementType.(type) {
@@ -232,6 +254,10 @@ func (g *Generator) generateOffsets(prefix string, fields []ast.Field, parentPat
 			buf.WriteString(fmt.Sprintf("const %s_%s_Offset = %d\n", prefix, fieldPath, offset))
 			buf.WriteString(fmt.Sprintf("const %s_%s_Size = %d\n\n", prefix, fieldPath, size))
 			offset += size
+		case *ast.EnumField:
+			buf.WriteString(fmt.Sprintf("const %s_%s_Offset = %d\n", prefix, fieldPath, offset))
+			buf.WriteString(fmt.Sprintf("const %s_%s_Size = 1\n\n", prefix, fieldPath))
+			offset += 1
 		case *ast.StructField:
 			buf.WriteString(g.generateOffsets(prefix, f.Struct.Fields, fieldPath+"_", offset))
 			structSize := g.calculateStructSize(f.Struct.Fields)
@@ -265,6 +291,8 @@ func (g *Generator) calculateStructSize(fields []ast.Field) int {
 		switch f := field.(type) {
 		case *ast.ScalarField:
 			size += f.Type.Size()
+		case *ast.EnumField:
+			size += 1
 		case *ast.StructField:
 			size += g.calculateStructSize(f.Struct.Fields)
 		case *ast.BitStructField:
@@ -290,6 +318,8 @@ func (g *Generator) generateSizeMethod(structName string, fields []ast.Field) st
 		switch f := field.(type) {
 		case *ast.ScalarField:
 			buf.WriteString(fmt.Sprintf("    size += %d // %s\n", f.Type.Size(), fieldName))
+		case *ast.EnumField:
+			buf.WriteString(fmt.Sprintf("    size += 1 // %s (enum)\n", fieldName))
 		case *ast.StructField:
 			buf.WriteString(fmt.Sprintf("    size += p.%s.Size()\n", fieldName))
 		case *ast.BitStructField:
@@ -335,6 +365,9 @@ func (g *Generator) generateMarshalMethod(structName string, fields []ast.Field)
 		switch f := field.(type) {
 		case *ast.ScalarField:
 			buf.WriteString(g.generateMarshalScalar(fieldName, f.Type))
+		case *ast.EnumField:
+			buf.WriteString(fmt.Sprintf("    buf[offset] = byte(p.%s)\n", fieldName))
+			buf.WriteString("    offset += 1\n\n")
 		case *ast.StructField:
 			buf.WriteString(fmt.Sprintf("    structData, err := p.%s.MarshalBinary()\n", fieldName))
 			buf.WriteString("    if err != nil {\n        return nil, err\n    }\n")
@@ -386,33 +419,70 @@ func (g *Generator) generateMarshalMethod(structName string, fields []ast.Field)
 
 func (g *Generator) generateMarshalScalar(fieldName string, scalarType ast.ScalarType) string {
 	var buf bytes.Buffer
+	endian := g.proto.Endian
+	if endian == "" {
+		endian = "big"
+	}
+
 	switch scalarType {
 	case ast.UINT8, ast.INT8:
 		buf.WriteString(fmt.Sprintf("    buf[offset] = byte(p.%s)\n", fieldName))
 		buf.WriteString("    offset += 1\n\n")
 	case ast.UINT16:
-		buf.WriteString(fmt.Sprintf("    binary.BigEndian.PutUint16(buf[offset:], p.%s)\n", fieldName))
+		if endian == "little" {
+			buf.WriteString(fmt.Sprintf("    binary.LittleEndian.PutUint16(buf[offset:], p.%s)\n", fieldName))
+		} else {
+			buf.WriteString(fmt.Sprintf("    binary.BigEndian.PutUint16(buf[offset:], p.%s)\n", fieldName))
+		}
 		buf.WriteString("    offset += 2\n\n")
 	case ast.INT16:
-		buf.WriteString(fmt.Sprintf("    binary.BigEndian.PutUint16(buf[offset:], uint16(p.%s))\n", fieldName))
+		if endian == "little" {
+			buf.WriteString(fmt.Sprintf("    binary.LittleEndian.PutUint16(buf[offset:], uint16(p.%s))\n", fieldName))
+		} else {
+			buf.WriteString(fmt.Sprintf("    binary.BigEndian.PutUint16(buf[offset:], uint16(p.%s))\n", fieldName))
+		}
 		buf.WriteString("    offset += 2\n\n")
 	case ast.UINT32:
-		buf.WriteString(fmt.Sprintf("    binary.BigEndian.PutUint32(buf[offset:], p.%s)\n", fieldName))
+		if endian == "little" {
+			buf.WriteString(fmt.Sprintf("    binary.LittleEndian.PutUint32(buf[offset:], p.%s)\n", fieldName))
+		} else {
+			buf.WriteString(fmt.Sprintf("    binary.BigEndian.PutUint32(buf[offset:], p.%s)\n", fieldName))
+		}
 		buf.WriteString("    offset += 4\n\n")
 	case ast.INT32:
-		buf.WriteString(fmt.Sprintf("    binary.BigEndian.PutUint32(buf[offset:], uint32(p.%s))\n", fieldName))
+		if endian == "little" {
+			buf.WriteString(fmt.Sprintf("    binary.LittleEndian.PutUint32(buf[offset:], uint32(p.%s))\n", fieldName))
+		} else {
+			buf.WriteString(fmt.Sprintf("    binary.BigEndian.PutUint32(buf[offset:], uint32(p.%s))\n", fieldName))
+		}
 		buf.WriteString("    offset += 4\n\n")
 	case ast.UINT64:
-		buf.WriteString(fmt.Sprintf("    binary.BigEndian.PutUint64(buf[offset:], p.%s)\n", fieldName))
+		if endian == "little" {
+			buf.WriteString(fmt.Sprintf("    binary.LittleEndian.PutUint64(buf[offset:], p.%s)\n", fieldName))
+		} else {
+			buf.WriteString(fmt.Sprintf("    binary.BigEndian.PutUint64(buf[offset:], p.%s)\n", fieldName))
+		}
 		buf.WriteString("    offset += 8\n\n")
 	case ast.INT64:
-		buf.WriteString(fmt.Sprintf("    binary.BigEndian.PutUint64(buf[offset:], uint64(p.%s))\n", fieldName))
+		if endian == "little" {
+			buf.WriteString(fmt.Sprintf("    binary.LittleEndian.PutUint64(buf[offset:], uint64(p.%s))\n", fieldName))
+		} else {
+			buf.WriteString(fmt.Sprintf("    binary.BigEndian.PutUint64(buf[offset:], uint64(p.%s))\n", fieldName))
+		}
 		buf.WriteString("    offset += 8\n\n")
 	case ast.FLOAT32:
-		buf.WriteString(fmt.Sprintf("    binary.BigEndian.PutUint32(buf[offset:], math.Float32bits(p.%s))\n", fieldName))
+		if endian == "little" {
+			buf.WriteString(fmt.Sprintf("    binary.LittleEndian.PutUint32(buf[offset:], math.Float32bits(p.%s))\n", fieldName))
+		} else {
+			buf.WriteString(fmt.Sprintf("    binary.BigEndian.PutUint32(buf[offset:], math.Float32bits(p.%s))\n", fieldName))
+		}
 		buf.WriteString("    offset += 4\n\n")
 	case ast.FLOAT64:
-		buf.WriteString(fmt.Sprintf("    binary.BigEndian.PutUint64(buf[offset:], math.Float64bits(p.%s))\n", fieldName))
+		if endian == "little" {
+			buf.WriteString(fmt.Sprintf("    binary.LittleEndian.PutUint64(buf[offset:], math.Float64bits(p.%s))\n", fieldName))
+		} else {
+			buf.WriteString(fmt.Sprintf("    binary.BigEndian.PutUint64(buf[offset:], math.Float64bits(p.%s))\n", fieldName))
+		}
 		buf.WriteString("    offset += 8\n\n")
 	}
 	return buf.String()
@@ -430,6 +500,9 @@ func (g *Generator) generateUnmarshalMethod(structName string, fields []ast.Fiel
 		switch f := field.(type) {
 		case *ast.ScalarField:
 			buf.WriteString(g.generateUnmarshalScalar(fieldName, f.Type))
+		case *ast.EnumField:
+			buf.WriteString(fmt.Sprintf("    p.%s = %s(data[offset])\n", fieldName, capitalize(f.EnumName)))
+			buf.WriteString("    offset += 1\n\n")
 		case *ast.StructField:
 			buf.WriteString(fmt.Sprintf("    if err := p.%s.UnmarshalBinary(data[offset:]); err != nil {\n", fieldName))
 			buf.WriteString("        return err\n    }\n")
@@ -574,6 +647,11 @@ func (g *Generator) sliceTypeName(f *ast.ArrayField) string {
 
 func (g *Generator) generateUnmarshalScalar(fieldName string, scalarType ast.ScalarType) string {
 	var buf bytes.Buffer
+	endian := g.proto.Endian
+	if endian == "" {
+		endian = "big"
+	}
+
 	switch scalarType {
 	case ast.UINT8:
 		buf.WriteString(fmt.Sprintf("    p.%s = data[offset]\n", fieldName))
@@ -582,28 +660,60 @@ func (g *Generator) generateUnmarshalScalar(fieldName string, scalarType ast.Sca
 		buf.WriteString(fmt.Sprintf("    p.%s = int8(data[offset])\n", fieldName))
 		buf.WriteString("    offset += 1\n\n")
 	case ast.UINT16:
-		buf.WriteString(fmt.Sprintf("    p.%s = binary.BigEndian.Uint16(data[offset:])\n", fieldName))
+		if endian == "little" {
+			buf.WriteString(fmt.Sprintf("    p.%s = binary.LittleEndian.Uint16(data[offset:])\n", fieldName))
+		} else {
+			buf.WriteString(fmt.Sprintf("    p.%s = binary.BigEndian.Uint16(data[offset:])\n", fieldName))
+		}
 		buf.WriteString("    offset += 2\n\n")
 	case ast.INT16:
-		buf.WriteString(fmt.Sprintf("    p.%s = int16(binary.BigEndian.Uint16(data[offset:]))\n", fieldName))
+		if endian == "little" {
+			buf.WriteString(fmt.Sprintf("    p.%s = int16(binary.LittleEndian.Uint16(data[offset:]))\n", fieldName))
+		} else {
+			buf.WriteString(fmt.Sprintf("    p.%s = int16(binary.BigEndian.Uint16(data[offset:]))\n", fieldName))
+		}
 		buf.WriteString("    offset += 2\n\n")
 	case ast.UINT32:
-		buf.WriteString(fmt.Sprintf("    p.%s = binary.BigEndian.Uint32(data[offset:])\n", fieldName))
+		if endian == "little" {
+			buf.WriteString(fmt.Sprintf("    p.%s = binary.LittleEndian.Uint32(data[offset:])\n", fieldName))
+		} else {
+			buf.WriteString(fmt.Sprintf("    p.%s = binary.BigEndian.Uint32(data[offset:])\n", fieldName))
+		}
 		buf.WriteString("    offset += 4\n\n")
 	case ast.INT32:
-		buf.WriteString(fmt.Sprintf("    p.%s = int32(binary.BigEndian.Uint32(data[offset:]))\n", fieldName))
+		if endian == "little" {
+			buf.WriteString(fmt.Sprintf("    p.%s = int32(binary.LittleEndian.Uint32(data[offset:]))\n", fieldName))
+		} else {
+			buf.WriteString(fmt.Sprintf("    p.%s = int32(binary.BigEndian.Uint32(data[offset:]))\n", fieldName))
+		}
 		buf.WriteString("    offset += 4\n\n")
 	case ast.UINT64:
-		buf.WriteString(fmt.Sprintf("    p.%s = binary.BigEndian.Uint64(data[offset:])\n", fieldName))
+		if endian == "little" {
+			buf.WriteString(fmt.Sprintf("    p.%s = binary.LittleEndian.Uint64(data[offset:])\n", fieldName))
+		} else {
+			buf.WriteString(fmt.Sprintf("    p.%s = binary.BigEndian.Uint64(data[offset:])\n", fieldName))
+		}
 		buf.WriteString("    offset += 8\n\n")
 	case ast.INT64:
-		buf.WriteString(fmt.Sprintf("    p.%s = int64(binary.BigEndian.Uint64(data[offset:]))\n", fieldName))
+		if endian == "little" {
+			buf.WriteString(fmt.Sprintf("    p.%s = int64(binary.LittleEndian.Uint64(data[offset:]))\n", fieldName))
+		} else {
+			buf.WriteString(fmt.Sprintf("    p.%s = int64(binary.BigEndian.Uint64(data[offset:]))\n", fieldName))
+		}
 		buf.WriteString("    offset += 8\n\n")
 	case ast.FLOAT32:
-		buf.WriteString(fmt.Sprintf("    p.%s = math.Float32frombits(binary.BigEndian.Uint32(data[offset:]))\n", fieldName))
+		if endian == "little" {
+			buf.WriteString(fmt.Sprintf("    p.%s = math.Float32frombits(binary.LittleEndian.Uint32(data[offset:]))\n", fieldName))
+		} else {
+			buf.WriteString(fmt.Sprintf("    p.%s = math.Float32frombits(binary.BigEndian.Uint32(data[offset:]))\n", fieldName))
+		}
 		buf.WriteString("    offset += 4\n\n")
 	case ast.FLOAT64:
-		buf.WriteString(fmt.Sprintf("    p.%s = math.Float64frombits(binary.BigEndian.Uint64(data[offset:]))\n", fieldName))
+		if endian == "little" {
+			buf.WriteString(fmt.Sprintf("    p.%s = math.Float64frombits(binary.LittleEndian.Uint64(data[offset:]))\n", fieldName))
+		} else {
+			buf.WriteString(fmt.Sprintf("    p.%s = math.Float64frombits(binary.BigEndian.Uint64(data[offset:]))\n", fieldName))
+		}
 		buf.WriteString("    offset += 8\n\n")
 	}
 	return buf.String()

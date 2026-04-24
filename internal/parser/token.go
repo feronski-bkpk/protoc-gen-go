@@ -2,7 +2,6 @@ package parser
 
 import "fmt"
 
-// TokenType определяет тип токена
 type TokenType int
 
 const (
@@ -12,37 +11,37 @@ const (
 	TokenString
 	TokenHexNumber
 
-	// Ключевые слова
 	TokenProtocol
 	TokenStruct
 	TokenBitStruct
+	TokenEnum
+	TokenAlias
+	TokenEndian
 	TokenID
 	TokenIf
 	TokenLengthFrom
 	TokenLength
 
-	// Знаки пунктуации
-	TokenColon     // :
-	TokenSemicolon // ;
-	TokenLBrace    // {
-	TokenRBrace    // }
-	TokenLBracket  // [
-	TokenRBracket  // ]
-	TokenLParen    // (
-	TokenRParen    // )
-	TokenComma     // ,
-	TokenDot       // .
+	TokenColon
+	TokenSemicolon
+	TokenLBrace
+	TokenRBrace
+	TokenLBracket
+	TokenRBracket
+	TokenLParen
+	TokenRParen
+	TokenComma
+	TokenDot
+	TokenEqAssign
 
-	// Операторы
-	TokenEq    // ==
-	TokenNotEq // !=
-	TokenLT    // <
-	TokenGT    // >
-	TokenLTE   // <=
-	TokenGTE   // >=
+	TokenEq
+	TokenNotEq
+	TokenLT
+	TokenGT
+	TokenLTE
+	TokenGTE
 )
 
-// Token представляет один токен
 type Token struct {
 	Type  TokenType
 	Value string
@@ -63,6 +62,9 @@ var tokenNames = map[TokenType]string{
 	TokenProtocol:   "protocol",
 	TokenStruct:     "struct",
 	TokenBitStruct:  "bitstruct",
+	TokenEnum:       "enum",
+	TokenAlias:      "alias",
+	TokenEndian:     "endian",
 	TokenID:         "id",
 	TokenIf:         "if",
 	TokenLengthFrom: "length_from",
@@ -77,6 +79,7 @@ var tokenNames = map[TokenType]string{
 	TokenRParen:     ")",
 	TokenComma:      ",",
 	TokenDot:        ".",
+	TokenEqAssign:   "=",
 	TokenEq:         "==",
 	TokenNotEq:      "!=",
 	TokenLT:         "<",

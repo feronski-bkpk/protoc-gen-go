@@ -10,8 +10,10 @@ import (
 )
 
 type Parser struct {
-	tokens []Token
-	pos    int
+	tokens  []Token
+	pos     int
+	aliases map[string]string
+	context string
 }
 
 func NewParser(tokens []Token) *Parser {
@@ -19,7 +21,21 @@ func NewParser(tokens []Token) *Parser {
 }
 
 func (p *Parser) Parse() (*ast.Protocol, error) {
-	return p.parseProtocol()
+	proto, err := p.parseProtocol()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, field := range proto.Fields {
+		if enumField, ok := field.(*ast.EnumField); ok {
+			if proto.Enums == nil {
+				proto.Enums = make(map[string]*ast.EnumType)
+			}
+			proto.Enums[enumField.EnumName] = enumField.Enum
+		}
+	}
+
+	return proto, nil
 }
 
 func ParseFile(filename string) (*ast.Protocol, error) {
@@ -54,7 +70,13 @@ func ParseString(input string) (*ast.Protocol, error) {
 	return p.Parse()
 }
 
+func (p *Parser) setContext(ctx string) {
+	p.context = ctx
+}
+
 func (p *Parser) parseProtocol() (*ast.Protocol, error) {
+	p.setContext("протокола")
+
 	if !p.match(TokenProtocol) {
 		return nil, p.error("ожидалось 'protocol'")
 	}
@@ -65,9 +87,12 @@ func (p *Parser) parseProtocol() (*ast.Protocol, error) {
 		return nil, p.error("ожидалась '{'")
 	}
 
-	if !p.match(TokenID) {
+	p.setContext("идентификатора протокола")
+
+	if p.current().Value != "id" {
 		return nil, p.error("ожидалось 'id'")
 	}
+	p.advance()
 	if !p.match(TokenColon) {
 		return nil, p.error("ожидалось ':'")
 	}
@@ -78,6 +103,30 @@ func (p *Parser) parseProtocol() (*ast.Protocol, error) {
 		return nil, fmt.Errorf("неверный ID пакета: %s", idTok.Value)
 	}
 
+	endian := "big"
+	if p.current().Value == "endian" {
+		p.setContext("настройки порядка байт")
+		p.advance()
+		if !p.match(TokenColon) {
+			return nil, p.error("ожидалось ':'")
+		}
+		endianTok := p.expect(TokenIdent)
+		endian = strings.ToLower(endianTok.Value)
+	}
+
+	p.aliases = make(map[string]string)
+	for p.current().Value == "alias" {
+		p.setContext("алиаса")
+		p.advance()
+		aliasName := p.expect(TokenIdent)
+		if !p.match(TokenColon) {
+			return nil, p.error("ожидалось ':'")
+		}
+		baseType := p.expect(TokenIdent)
+		p.aliases[aliasName.Value] = baseType.Value
+	}
+
+	p.setContext("полей протокола")
 	fields, err := p.parseFields()
 	if err != nil {
 		return nil, err
@@ -92,6 +141,7 @@ func (p *Parser) parseProtocol() (*ast.Protocol, error) {
 		PacketID: uint16(packetID),
 		Fields:   fields,
 		Types:    make(map[string]*ast.StructType),
+		Endian:   endian,
 	}, nil
 }
 
@@ -113,6 +163,7 @@ func (p *Parser) parseFields() ([]ast.Field, error) {
 
 func (p *Parser) parseField() (ast.Field, error) {
 	nameTok := p.expect(TokenIdent)
+	p.setContext("поля '" + nameTok.Value + "'")
 
 	if !p.match(TokenColon) {
 		return nil, p.error("ожидалось ':'")
@@ -133,9 +184,22 @@ func (p *Parser) parseField() (ast.Field, error) {
 	case p.match(TokenLBracket):
 		return p.parseArrayField(nameTok.Value)
 
+	case p.match(TokenEnum):
+		return p.parseEnumField(nameTok.Value)
+
 	case p.isType():
 		typeName := p.current().Value
 		p.advance()
+
+		if p.aliases != nil {
+			if baseType, ok := p.aliases[typeName]; ok {
+				typeName = baseType
+			}
+		}
+
+		if typeName == "bytes" {
+			return p.parseBytesField(nameTok.Value)
+		}
 
 		field := &ast.ScalarField{
 			Name: nameTok.Value,
@@ -143,6 +207,7 @@ func (p *Parser) parseField() (ast.Field, error) {
 		}
 
 		if p.match(TokenIf) {
+			p.setContext("условия поля '" + nameTok.Value + "'")
 			cond, err := p.parseCondition()
 			if err != nil {
 				return nil, err
@@ -157,6 +222,8 @@ func (p *Parser) parseField() (ast.Field, error) {
 }
 
 func (p *Parser) parseStructField(name string) (ast.Field, error) {
+	p.setContext("структуры '" + name + "'")
+
 	if !p.match(TokenLBrace) {
 		return nil, p.error("ожидалась '{'")
 	}
@@ -176,6 +243,7 @@ func (p *Parser) parseStructField(name string) (ast.Field, error) {
 	}
 
 	if p.match(TokenIf) {
+		p.setContext("условия структуры '" + name + "'")
 		cond, err := p.parseCondition()
 		if err != nil {
 			return nil, err
@@ -187,6 +255,8 @@ func (p *Parser) parseStructField(name string) (ast.Field, error) {
 }
 
 func (p *Parser) parseBitStructField(name string) (ast.Field, error) {
+	p.setContext("битовой структуры '" + name + "'")
+
 	if !p.match(TokenLBrace) {
 		return nil, p.error("ожидалась '{'")
 	}
@@ -249,6 +319,8 @@ func (p *Parser) parseBitStructField(name string) (ast.Field, error) {
 }
 
 func (p *Parser) parseArrayField(name string) (ast.Field, error) {
+	p.setContext("массива '" + name + "'")
+
 	if p.match(TokenRBracket) {
 		return p.parseSliceField(name)
 	}
@@ -282,6 +354,13 @@ func (p *Parser) parseArrayField(name string) (ast.Field, error) {
 	}
 
 	typeName := p.expectIdent()
+
+	if p.aliases != nil {
+		if baseType, ok := p.aliases[typeName]; ok {
+			typeName = baseType
+		}
+	}
+
 	return &ast.ArrayField{
 		Name: name,
 		ElementType: &ast.ScalarField{
@@ -292,6 +371,8 @@ func (p *Parser) parseArrayField(name string) (ast.Field, error) {
 }
 
 func (p *Parser) parseSliceField(name string) (ast.Field, error) {
+	p.setContext("слайса '" + name + "'")
+
 	if p.match(TokenStruct) {
 		if !p.match(TokenLBrace) {
 			return nil, p.error("ожидалась '{'")
@@ -323,6 +404,13 @@ func (p *Parser) parseSliceField(name string) (ast.Field, error) {
 	}
 
 	typeName := p.expectIdent()
+
+	if p.aliases != nil {
+		if baseType, ok := p.aliases[typeName]; ok {
+			typeName = baseType
+		}
+	}
+
 	field := &ast.ArrayField{
 		Name: name,
 		ElementType: &ast.ScalarField{
@@ -339,6 +427,7 @@ func (p *Parser) parseSliceField(name string) (ast.Field, error) {
 	}
 
 	if p.match(TokenIf) {
+		p.setContext("условия слайса '" + name + "'")
 		cond, err := p.parseCondition()
 		if err != nil {
 			return nil, err
@@ -350,6 +439,8 @@ func (p *Parser) parseSliceField(name string) (ast.Field, error) {
 }
 
 func (p *Parser) parseBytesField(name string) (ast.Field, error) {
+	p.setContext("bytes поля '" + name + "'")
+
 	field := &ast.BytesField{
 		Name: name,
 	}
@@ -363,6 +454,7 @@ func (p *Parser) parseBytesField(name string) (ast.Field, error) {
 	}
 
 	if p.match(TokenIf) {
+		p.setContext("условия bytes поля '" + name + "'")
 		cond, err := p.parseCondition()
 		if err != nil {
 			return nil, err
@@ -371,6 +463,42 @@ func (p *Parser) parseBytesField(name string) (ast.Field, error) {
 	}
 
 	return field, nil
+}
+
+func (p *Parser) parseEnumField(name string) (ast.Field, error) {
+	p.setContext("enum '" + name + "'")
+
+	if !p.match(TokenLBrace) {
+		return nil, p.error("ожидалась '{'")
+	}
+
+	enumType := &ast.EnumType{
+		Name: name + "Enum",
+	}
+
+	for !p.isEOF() && p.current().Type != TokenRBrace {
+		valueName := p.expectIdent()
+		if !p.match(TokenEqAssign) {
+			return nil, p.error("ожидался '='")
+		}
+		valueNum := p.expect(TokenNumber)
+		val, _ := strconv.Atoi(valueNum.Value)
+
+		enumType.Values = append(enumType.Values, &ast.EnumValue{
+			Name:  valueName,
+			Value: val,
+		})
+	}
+
+	if !p.match(TokenRBrace) {
+		return nil, p.error("ожидалась '}'")
+	}
+
+	return &ast.EnumField{
+		Name:     name,
+		EnumName: enumType.Name,
+		Enum:     enumType,
+	}, nil
 }
 
 func (p *Parser) parseCondition() (*ast.Condition, error) {
@@ -467,7 +595,15 @@ func (p *Parser) isType() bool {
 		"int8": true, "int16": true, "int32": true, "int64": true,
 		"float32": true, "float64": true,
 	}
-	return types[t.Value]
+	if types[t.Value] {
+		return true
+	}
+	if p.aliases != nil {
+		if _, ok := p.aliases[t.Value]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *Parser) isEOF() bool {
@@ -476,5 +612,10 @@ func (p *Parser) isEOF() bool {
 
 func (p *Parser) error(msg string) error {
 	tok := p.current()
-	return fmt.Errorf("%s (строка %d, колонка %d: '%s')", msg, tok.Line, tok.Col, tok.Value)
+	ctx := ""
+	if p.context != "" {
+		ctx = " при парсинге " + p.context
+	}
+	return fmt.Errorf("%s%s (строка %d, колонка %d: '%s')",
+		msg, ctx, tok.Line, tok.Col, tok.Value)
 }

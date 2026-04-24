@@ -6,7 +6,6 @@ import (
 	"unicode"
 )
 
-// Lexer разбивает исходный текст на токены
 type Lexer struct {
 	input  []rune
 	pos    int
@@ -15,7 +14,6 @@ type Lexer struct {
 	tokens []Token
 }
 
-// NewLexer создаёт новый лексер
 func NewLexer(input string) *Lexer {
 	return &Lexer{
 		input: []rune(input),
@@ -24,7 +22,6 @@ func NewLexer(input string) *Lexer {
 	}
 }
 
-// Tokenize разбирает весь входной поток на токены
 func (l *Lexer) Tokenize() ([]Token, error) {
 	for l.pos < len(l.input) {
 		ch := l.current()
@@ -84,7 +81,7 @@ func (l *Lexer) Tokenize() ([]Token, error) {
 				l.advance()
 				l.emit(TokenEq, "==")
 			} else {
-				return nil, fmt.Errorf("неожиданный символ '=' на %d:%d", l.line, l.col)
+				l.emit(TokenEqAssign, "=")
 			}
 		case '!':
 			if l.peek() == '=' {
@@ -192,14 +189,20 @@ func (l *Lexer) tokenizeIdent() {
 		tokenType = TokenStruct
 	case "bitstruct":
 		tokenType = TokenBitStruct
+	case "enum":
+		tokenType = TokenEnum
+	case "alias":
+		tokenType = TokenIdent
 	case "id":
-		tokenType = TokenID
+		tokenType = TokenIdent
 	case "if":
 		tokenType = TokenIf
 	case "length_from":
 		tokenType = TokenLengthFrom
 	case "length":
 		tokenType = TokenLength
+	case "endian":
+		tokenType = TokenIdent
 	}
 
 	l.tokens = append(l.tokens, Token{Type: tokenType, Value: value, Line: l.line, Col: l.col})

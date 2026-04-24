@@ -207,6 +207,22 @@ func printFields(fields []ast.Field, indent int) {
 			}
 			fmt.Println()
 
+		case *ast.EnumField:
+			fmt.Printf("%s- %s: enum {", prefix, f.Name)
+			if f.Enum != nil {
+				for i, val := range f.Enum.Values {
+					if i > 0 {
+						fmt.Printf(", ")
+					}
+					fmt.Printf("%s = %d", val.Name, val.Value)
+				}
+			}
+			fmt.Printf("}")
+			if f.Condition != nil {
+				fmt.Printf(" [если %s %s %d]", f.Condition.Field, f.Condition.Operator, f.Condition.Value)
+			}
+			fmt.Println()
+
 		case *ast.BytesField:
 			fmt.Printf("%s- %s: bytes", prefix, f.Name)
 			if f.LengthFrom != "" {
