@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sort"
 	"strings"
 
+	"github.com/feronski-bkpk/protoc-gen-go/internal/analyzer"
 	"github.com/feronski-bkpk/protoc-gen-go/internal/ast"
 	"github.com/feronski-bkpk/protoc-gen-go/internal/dsl"
 	"github.com/feronski-bkpk/protoc-gen-go/internal/generator"
@@ -47,6 +49,25 @@ func main() {
 
 	fmt.Printf("Успешно разобран протокол: %s (ID: 0x%04X)\n", proto.Name, proto.PacketID)
 	fmt.Printf("Всего полей: %d\n", len(proto.Fields))
+
+	fmt.Printf("\nАнализ протокола...\n")
+	a := analyzer.NewAnalyzer(proto)
+	if err := a.Analyze(); err != nil {
+		log.Fatalf("Ошибка анализа: %v", err)
+	}
+	fmt.Printf("Анализ завершён успешно\n")
+
+	fmt.Println("\nТаблица символов:")
+	symTable := a.GetSymbolTable()
+	var paths []string
+	for path := range symTable {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	for _, path := range paths {
+		info := symTable[path]
+		fmt.Printf("  %-35s offset=%4d size=%4d\n", path, info.Offset, info.Size)
+	}
 
 	fmt.Printf("\nГенерация Go кода...\n")
 	gen := generator.NewGenerator(proto)
@@ -119,7 +140,11 @@ func printFields(fields []ast.Field, indent int) {
 			fmt.Println()
 
 		case *ast.ArrayField:
-			fmt.Printf("%s- %s: []", prefix, f.Name)
+			if f.FixedLength > 0 {
+				fmt.Printf("%s- %s: [%d]", prefix, f.Name, f.FixedLength)
+			} else {
+				fmt.Printf("%s- %s: []", prefix, f.Name)
+			}
 			switch elem := f.ElementType.(type) {
 			case *ast.ScalarField:
 				fmt.Printf("%s", elem.Type)

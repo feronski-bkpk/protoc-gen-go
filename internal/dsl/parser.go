@@ -13,7 +13,7 @@ import (
 
 var (
 	dslLexer = lexer.MustSimple([]lexer.SimpleRule{
-		{Name: "Keyword", Pattern: `protocol|struct|bitstruct|id|if|length_from|length|repeated`},
+		{Name: "Keyword", Pattern: `protocol|struct|bitstruct|id|if|length_from|length`},
 		{Name: "Slice", Pattern: `\[\]`},
 		{Name: "Type", Pattern: `uint8|uint16|uint32|uint64|int8|int16|int32|int64|float32|float64|bytes`},
 		{Name: "Ident", Pattern: `[a-zA-Z_][a-zA-Z0-9_]*`},
@@ -206,61 +206,31 @@ func (f *Field) ToAST() (ast.Field, error) {
 		}, nil
 	}
 
-	if f.Type.Repeated != nil && f.Type.RepeatedLength != nil {
-		if f.Type.Repeated.Scalar != "" {
-			elemField := &ast.ScalarField{
-				Type: ast.ScalarType(f.Type.Repeated.Scalar),
-			}
-			return &ast.ArrayField{
-				Name:        f.Name,
-				ElementType: elemField,
-				FixedLength: *f.Type.RepeatedLength,
-				Condition:   condition,
-			}, nil
+	if f.Type.ArraySize != nil && f.Type.ArrayScalar != nil {
+		elemField := &ast.ScalarField{
+			Type: ast.ScalarType(*f.Type.ArrayScalar),
 		}
-		if f.Type.Repeated.Struct != nil {
-			fields := make([]ast.Field, 0)
-			for _, sf := range f.Type.Repeated.Struct.Body {
-				field, err := sf.ToAST()
-				if err != nil {
-					return nil, err
-				}
-				if field != nil {
-					fields = append(fields, field)
-				}
-			}
-			elemField := &ast.StructField{
-				Struct: &ast.StructType{Fields: fields},
-			}
-			return &ast.ArrayField{
-				Name:        f.Name,
-				ElementType: elemField,
-				FixedLength: *f.Type.RepeatedLength,
-				Condition:   condition,
-			}, nil
-		}
+		return &ast.ArrayField{
+			Name:        f.Name,
+			ElementType: elemField,
+			FixedLength: *f.Type.ArraySize,
+			Condition:   condition,
+		}, nil
 	}
 
 	return nil, nil
 }
 
 type FieldType struct {
-	Scalar         *string       `parser:"  @('uint8'|'uint16'|'uint32'|'uint64'|'int8'|'int16'|'int32'|'int64'|'float32'|'float64')"`
-	Struct         *Struct       `parser:"| 'struct' @@"`
-	BitStruct      *BitStructDef `parser:"| 'bitstruct' @@"`
-	Bytes          bool          `parser:"| @'bytes'"`
-	SliceScalar    *string       `parser:"| '[]' @('uint8'|'uint16'|'uint32'|'uint64'|'int8'|'int16'|'int32'|'int64'|'float32'|'float64')"`
-	SliceStruct    *SliceStruct  `parser:"| '[]' 'struct' @@"`
-	Repeated       *RepeatedDef  `parser:"| 'repeated' @@ 'length' ':' @Number"`
-	RepeatedLength *int          `parser:""`
+	Scalar      *string       `parser:"  @('uint8'|'uint16'|'uint32'|'uint64'|'int8'|'int16'|'int32'|'int64'|'float32'|'float64')"`
+	Struct      *Struct       `parser:"| 'struct' @@"`
+	BitStruct   *BitStructDef `parser:"| 'bitstruct' @@"`
+	Bytes       bool          `parser:"| @'bytes'"`
+	SliceScalar *string       `parser:"| '[]' @('uint8'|'uint16'|'uint32'|'uint64'|'int8'|'int16'|'int32'|'int64'|'float32'|'float64')"`
+	SliceStruct *SliceStruct  `parser:"| '[]' 'struct' @@"`
+	ArraySize   *int          `parser:"| '[' @Number ']'"`
+	ArrayScalar *string       `parser:"  @('uint8'|'uint16'|'uint32'|'uint64'|'int8'|'int16'|'int32'|'int64'|'float32'|'float64')"`
 }
-
-type RepeatedDef struct {
-	Scalar string  `parser:"  @('uint8'|'uint16'|'uint32'|'uint64'|'int8'|'int16'|'int32'|'int64'|'float32'|'float64')"`
-	Struct *Struct `parser:"| 'struct' @@"`
-}
-
-func (r *RepeatedDef) Capture(values []string) error { return nil }
 
 type SliceStruct struct {
 	Body []*Field `parser:"'{' @@* '}'"`

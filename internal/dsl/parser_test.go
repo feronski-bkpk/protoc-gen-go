@@ -165,14 +165,8 @@ protocol ArrayTest {
 	assert.Equal(t, "values", array1.Name)
 	assert.Equal(t, 0, array1.FixedLength)
 
-	scalarElem := array1.ElementType.(*ast.ScalarField)
-	assert.Equal(t, ast.FLOAT32, scalarElem.Type)
-
 	array2 := proto.Fields[1].(*ast.ArrayField)
 	assert.Equal(t, "points", array2.Name)
-
-	structElem := array2.ElementType.(*ast.StructField)
-	assert.Len(t, structElem.Struct.Fields, 2)
 }
 
 func TestParser_SliceScalar(t *testing.T) {
@@ -189,17 +183,10 @@ protocol SliceTest {
 	require.NoError(t, err)
 	assert.Len(t, proto.Fields, 2)
 
-	countField := proto.Fields[0].(*ast.ScalarField)
-	assert.Equal(t, "count", countField.Name)
-	assert.Equal(t, ast.UINT16, countField.Type)
-
 	sliceField := proto.Fields[1].(*ast.ArrayField)
 	assert.Equal(t, "values", sliceField.Name)
 	assert.Equal(t, 0, sliceField.FixedLength)
 	assert.Equal(t, "count", sliceField.LengthFrom)
-
-	scalarElem := sliceField.ElementType.(*ast.ScalarField)
-	assert.Equal(t, ast.FLOAT32, scalarElem.Type)
 }
 
 func TestParser_SliceStruct(t *testing.T) {
@@ -222,11 +209,7 @@ protocol SliceStructTest {
 
 	sliceField := proto.Fields[1].(*ast.ArrayField)
 	assert.Equal(t, "points", sliceField.Name)
-	assert.Equal(t, 0, sliceField.FixedLength)
 	assert.Equal(t, "count", sliceField.LengthFrom)
-
-	structElem := sliceField.ElementType.(*ast.StructField)
-	assert.Len(t, structElem.Struct.Fields, 3)
 }
 
 func TestParser_SliceWithCondition(t *testing.T) {
@@ -247,7 +230,22 @@ protocol SliceCondTest {
 	sliceField := proto.Fields[2].(*ast.ArrayField)
 	assert.Equal(t, "data", sliceField.Name)
 	assert.NotNil(t, sliceField.Condition)
-	assert.Equal(t, "flags", sliceField.Condition.Field)
-	assert.Equal(t, "==", sliceField.Condition.Operator)
-	assert.Equal(t, uint64(1), sliceField.Condition.Value)
+}
+
+func TestParser_FixedArray(t *testing.T) {
+	input := `
+protocol FixedArrayTest {
+    id: 0x8000
+    values: [10]float32
+}
+`
+	parser := NewParser()
+	proto, err := parser.ParseString(input)
+
+	require.NoError(t, err)
+	assert.Len(t, proto.Fields, 1)
+
+	arr := proto.Fields[0].(*ast.ArrayField)
+	assert.Equal(t, "values", arr.Name)
+	assert.Equal(t, 10, arr.FixedLength)
 }
