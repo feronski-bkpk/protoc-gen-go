@@ -23,9 +23,12 @@ func (g *Generator) Generate() (string, error) {
 	buf.WriteString("// source: " + g.proto.Name + "\n\n")
 	buf.WriteString("package protocol\n\n")
 
-	needsBinary, needsMath := g.checkNeededImports(g.proto.Fields)
-	if needsBinary || needsMath {
+	needsBinary, needsMath, needsFmt := g.checkNeededImports(g.proto.Fields)
+	if needsBinary || needsMath || needsFmt {
 		buf.WriteString("import (\n")
+		if needsFmt {
+			buf.WriteString("    \"fmt\"\n")
+		}
 		if needsBinary {
 			buf.WriteString("    \"encoding/binary\"\n")
 		}
@@ -56,9 +59,10 @@ func (g *Generator) Generate() (string, error) {
 	return buf.String(), nil
 }
 
-func (g *Generator) checkNeededImports(fields []ast.Field) (bool, bool) {
+func (g *Generator) checkNeededImports(fields []ast.Field) (bool, bool, bool) {
 	needsBinary := false
 	needsMath := false
+	needsFmt := false
 	for _, field := range fields {
 		switch f := field.(type) {
 		case *ast.ScalarField:
@@ -69,17 +73,28 @@ func (g *Generator) checkNeededImports(fields []ast.Field) (bool, bool) {
 				needsBinary = true
 				needsMath = true
 			}
+			if f.Min != nil || f.Max != nil || f.Required {
+				needsFmt = true
+			}
 		case *ast.StructField:
-			b, m := g.checkNeededImports(f.Struct.Fields)
+			b, m, ft := g.checkNeededImports(f.Struct.Fields)
 			needsBinary = needsBinary || b
 			needsMath = needsMath || m
+			needsFmt = needsFmt || ft
 		case *ast.ArrayField:
-			b, m := g.checkNeededImports([]ast.Field{f.ElementType})
+			b, m, ft := g.checkNeededImports([]ast.Field{f.ElementType})
 			needsBinary = needsBinary || b
 			needsMath = needsMath || m
+			needsFmt = needsFmt || ft
+		case *ast.BytesField:
+			if f.MaxLength > 0 || f.Required {
+				needsFmt = true
+			}
+		case *ast.BitStructField:
+			needsBinary = true
 		}
 	}
-	return needsBinary, needsMath
+	return needsBinary, needsMath, needsFmt
 }
 
 type structInfo struct {
@@ -135,6 +150,7 @@ func (g *Generator) generateStructDef(name string, fields []ast.Field) (string, 
 	buf.WriteString(g.generateSizeMethod(name, fields))
 	buf.WriteString(g.generateMarshalMethod(name, fields))
 	buf.WriteString(g.generateUnmarshalMethod(name, fields))
+	buf.WriteString(g.generateValidateMethod(name, fields))
 
 	for _, field := range fields {
 		if bitField, ok := field.(*ast.BitStructField); ok {
@@ -202,16 +218,6 @@ func (g *Generator) fieldToGo(field ast.Field) (string, error) {
 	return "", fmt.Errorf("unsupported type: %T", field)
 }
 
-func (g *Generator) sliceTypeName(field *ast.ArrayField) string {
-	switch elem := field.ElementType.(type) {
-	case *ast.ScalarField:
-		return "[]" + scalarToGoType(elem.Type)
-	case *ast.StructField:
-		return "[]" + capitalize(field.Name) + "Elem"
-	}
-	return "[]interface{}"
-}
-
 func (g *Generator) generateOffsets(prefix string, fields []ast.Field, parentPath string, baseOffset int) string {
 	var buf bytes.Buffer
 	offset := baseOffset
@@ -237,7 +243,15 @@ func (g *Generator) generateOffsets(prefix string, fields []ast.Field, parentPat
 			buf.WriteString(fmt.Sprintf("const %s_%s_Size = 1\n\n", prefix, fieldPath))
 			offset += 1
 		case *ast.ArrayField:
-			buf.WriteString(fmt.Sprintf("// %s_%s has dynamic offset\n", prefix, fieldPath))
+			if f.FixedLength > 0 {
+				elemSize := f.ElementType.GetSize()
+				totalSize := elemSize * f.FixedLength
+				buf.WriteString(fmt.Sprintf("const %s_%s_Offset = %d\n", prefix, fieldPath, offset))
+				buf.WriteString(fmt.Sprintf("const %s_%s_Size = %d\n\n", prefix, fieldPath, totalSize))
+				offset += totalSize
+			} else {
+				buf.WriteString(fmt.Sprintf("// %s_%s has dynamic offset\n", prefix, fieldPath))
+			}
 		case *ast.BytesField:
 			buf.WriteString(fmt.Sprintf("// %s_%s has dynamic offset\n", prefix, fieldPath))
 		}
@@ -256,7 +270,9 @@ func (g *Generator) calculateStructSize(fields []ast.Field) int {
 		case *ast.BitStructField:
 			size += 1
 		case *ast.ArrayField:
-		case *ast.BytesField:
+			if f.FixedLength > 0 {
+				size += f.ElementType.GetSize() * f.FixedLength
+			}
 		}
 	}
 	return size
@@ -433,6 +449,17 @@ func (g *Generator) generateUnmarshalMethod(structName string, fields []ast.Fiel
 				}
 				buf.WriteString("    }\n\n")
 			} else if f.LengthFrom != "" {
+				lengthField := capitalize(f.LengthFrom)
+				buf.WriteString(fmt.Sprintf("    p.%s = make(%s, p.%s)\n", fieldName, g.sliceTypeName(f), lengthField))
+				buf.WriteString(fmt.Sprintf("    for i := 0; i < int(p.%s); i++ {\n", lengthField))
+				if _, ok := f.ElementType.(*ast.ScalarField); ok {
+					buf.WriteString(fmt.Sprintf("        %s", g.generateUnmarshalScalar(fmt.Sprintf("%s[i]", fieldName), f.ElementType.(*ast.ScalarField).Type)))
+				} else {
+					buf.WriteString(fmt.Sprintf("        if err := p.%s[i].UnmarshalBinary(data[offset:]); err != nil {\n", fieldName))
+					buf.WriteString("            return err\n        }\n")
+					buf.WriteString(fmt.Sprintf("        offset += p.%s[i].Size()\n", fieldName))
+				}
+				buf.WriteString("    }\n\n")
 			}
 		case *ast.BytesField:
 			if f.Condition != nil {
@@ -457,6 +484,92 @@ func (g *Generator) generateUnmarshalMethod(structName string, fields []ast.Fiel
 	buf.WriteString("    return nil\n")
 	buf.WriteString("}\n\n")
 	return buf.String()
+}
+
+func (g *Generator) generateValidateMethod(structName string, fields []ast.Field) string {
+	var buf bytes.Buffer
+
+	buf.WriteString(fmt.Sprintf("func (p *%s) Validate() error {\n", structName))
+
+	for _, field := range fields {
+		fieldName := capitalize(field.GetName())
+
+		switch f := field.(type) {
+		case *ast.ScalarField:
+			if f.Min != nil || f.Max != nil {
+				buf.WriteString(fmt.Sprintf("    // Проверка границ для %s (%d-%d)\n", fieldName,
+					valOrZero(f.Min), valOrMax(f.Max)))
+				if f.Min != nil {
+					buf.WriteString(fmt.Sprintf("    if p.%s < %d {\n", fieldName, *f.Min))
+					buf.WriteString(fmt.Sprintf("        return fmt.Errorf(\"%s: значение %%d меньше минимального %d\", p.%s)\n",
+						fieldName, *f.Min, fieldName))
+					buf.WriteString("    }\n")
+				}
+				if f.Max != nil {
+					buf.WriteString(fmt.Sprintf("    if p.%s > %d {\n", fieldName, *f.Max))
+					buf.WriteString(fmt.Sprintf("        return fmt.Errorf(\"%s: значение %%d больше максимального %d\", p.%s)\n",
+						fieldName, *f.Max, fieldName))
+					buf.WriteString("    }\n")
+				}
+			}
+
+		case *ast.StructField:
+			buf.WriteString(fmt.Sprintf("    if err := p.%s.Validate(); err != nil {\n", fieldName))
+			buf.WriteString(fmt.Sprintf("        return fmt.Errorf(\"%s: %%w\", err)\n", fieldName))
+			buf.WriteString("    }\n")
+
+		case *ast.BytesField:
+			if f.MaxLength > 0 {
+				buf.WriteString(fmt.Sprintf("    if len(p.%s) > %d {\n", fieldName, f.MaxLength))
+				buf.WriteString(fmt.Sprintf("        return fmt.Errorf(\"%s: длина %%d превышает максимальную %d\", len(p.%s))\n",
+					fieldName, f.MaxLength, fieldName))
+				buf.WriteString("    }\n")
+			}
+			if f.Required {
+				buf.WriteString(fmt.Sprintf("    if len(p.%s) == 0 {\n", fieldName))
+				buf.WriteString(fmt.Sprintf("        return fmt.Errorf(\"%s: обязательное поле не заполнено\")\n", fieldName))
+				buf.WriteString("    }\n")
+			}
+
+		case *ast.ArrayField:
+			if f.FixedLength > 0 {
+				buf.WriteString(fmt.Sprintf("    // Проверка фиксированной длины массива %s\n", fieldName))
+				buf.WriteString(fmt.Sprintf("    if len(p.%s) != %d {\n", fieldName, f.FixedLength))
+				buf.WriteString(fmt.Sprintf("        return fmt.Errorf(\"%s: длина %%d не соответствует ожидаемой %d\", len(p.%s))\n",
+					fieldName, f.FixedLength, fieldName))
+				buf.WriteString("    }\n")
+			}
+		}
+	}
+
+	buf.WriteString("    return nil\n")
+	buf.WriteString("}\n\n")
+
+	return buf.String()
+}
+
+func valOrZero(v *uint64) uint64 {
+	if v == nil {
+		return 0
+	}
+	return *v
+}
+
+func valOrMax(v *uint64) uint64 {
+	if v == nil {
+		return ^uint64(0)
+	}
+	return *v
+}
+
+func (g *Generator) sliceTypeName(f *ast.ArrayField) string {
+	switch elem := f.ElementType.(type) {
+	case *ast.ScalarField:
+		return "[]" + scalarToGoType(elem.Type)
+	case *ast.StructField:
+		return "[]" + capitalize(f.Name) + "Elem"
+	}
+	return "[]interface{}"
 }
 
 func (g *Generator) generateUnmarshalScalar(fieldName string, scalarType ast.ScalarType) string {
@@ -497,7 +610,13 @@ func (g *Generator) generateUnmarshalScalar(fieldName string, scalarType ast.Sca
 }
 
 func (g *Generator) conditionToGo(cond *ast.Condition) string {
-	return fmt.Sprintf("p.%s %s %d", capitalize(cond.Field), cond.Operator, cond.Value)
+	parts := strings.Split(cond.Field, ".")
+	var goPath []string
+	for _, part := range parts {
+		goPath = append(goPath, capitalize(part))
+	}
+	fieldPath := "p." + strings.Join(goPath, ".")
+	return fmt.Sprintf("%s %s %d", fieldPath, cond.Operator, cond.Value)
 }
 
 func scalarToGoType(t ast.ScalarType) string {

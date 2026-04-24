@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/feronski-bkpk/protoc-gen-go/internal/ast"
 )
@@ -373,7 +374,14 @@ func (p *Parser) parseBytesField(name string) (ast.Field, error) {
 }
 
 func (p *Parser) parseCondition() (*ast.Condition, error) {
-	fieldTok := p.expect(TokenIdent)
+	var parts []string
+	parts = append(parts, p.expectIdent())
+
+	for p.match(TokenDot) {
+		parts = append(parts, p.expectIdent())
+	}
+
+	fieldPath := strings.Join(parts, ".")
 
 	var op string
 	switch {
@@ -405,7 +413,7 @@ func (p *Parser) parseCondition() (*ast.Condition, error) {
 	p.advance()
 
 	return &ast.Condition{
-		Field:    fieldTok.Value,
+		Field:    fieldPath,
 		Operator: op,
 		Value:    val,
 	}, nil

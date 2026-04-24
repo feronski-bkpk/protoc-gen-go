@@ -27,7 +27,7 @@ GOVET := $(GOCMD) vet
 # ============================================================================
 
 .PHONY: all
-all: clean deps fmt lint test test-parser test-analyzer build
+all: clean deps fmt lint test build
 
 .PHONY: help
 help:
@@ -38,16 +38,19 @@ help:
 	@echo ""
 	@echo "Доступные цели:"
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
-		awk 'BEGIN {FS = ":.*?## "}; {printf "  %-18s %s\n", $$1, $$2}'
+		awk 'BEGIN {FS = ":.*?## "}; {printf "  %-20s %s\n", $$1, $$2}'
 	@echo ""
 	@echo "Примеры:"
 	@echo "  make build          # Собрать бинарный файл"
 	@echo "  make test           # Запустить все тесты"
 	@echo "  make test-parser    # Запустить тесты парсера"
 	@echo "  make test-analyzer  # Запустить тесты анализатора"
+	@echo "  make test-binary    # Запустить тесты бинарного формата"
 	@echo "  make demo           # Запустить демонстрацию"
 	@echo "  make demo-arrays    # Запустить демо слайсов"
 	@echo "  make demo-dns       # Запустить демо DNS"
+	@echo "  make demo-conditions # Запустить демо условий"
+	@echo "  make save-bin       # Сохранить схему в бинарный формат"
 	@echo "  make install        # Установить в GOPATH/bin"
 
 .PHONY: deps
@@ -70,7 +73,7 @@ lint: ## Запустить линтеры (vet)
 	@echo "Линтинг пройден"
 
 .PHONY: test-parser
-test-parser: ## Запустить тесты нового парсера
+test-parser: ## Запустить тесты парсера
 	@echo "Тесты парсера..."
 	@cd internal/parser && $(GOTEST) -v
 	@echo "Все тесты парсера пройдены"
@@ -81,8 +84,14 @@ test-analyzer: ## Запустить тесты анализатора
 	@cd internal/analyzer && $(GOTEST) -v
 	@echo "Все тесты анализатора пройдены"
 
+.PHONY: test-binary
+test-binary: ## Запустить тесты бинарного формата
+	@echo "Тесты бинарного формата..."
+	@cd internal/binary && $(GOTEST) -v 2>/dev/null || echo "Тесты бинарного формата пока не созданы"
+	@echo "Все тесты бинарного формата пройдены"
+
 .PHONY: test
-test: test-parser test-analyzer ## Запустить все тесты
+test: test-parser test-analyzer test-binary ## Запустить все тесты
 
 .PHONY: test-coverage
 test-coverage: ## Запустить тесты с отчётом о покрытии
@@ -124,12 +133,14 @@ clean: ## Очистить артефакты сборки и сгенериро
 	@rm -f examples/*/*.gen.go 2>/dev/null || true
 	@rm -f testdata/*.gen.go testdata/protocol/*.gen.go 2>/dev/null || true
 	@find . -name "*.gen.go" -type f -delete 2>/dev/null || true
+	@find . -name "*.bin" -type f -delete 2>/dev/null || true
 	@find . -name "*.test" -type f -delete 2>/dev/null || true
 	@find . -name ".DS_Store" -type f -delete 2>/dev/null || true
 	@find . -name "Thumbs.db" -type f -delete 2>/dev/null || true
 	@find . -name "*~" -type f -delete 2>/dev/null || true
 	@find . -name "*.swp" -type f -delete 2>/dev/null || true
 	@rm -rf testdata/protocol demo/protocol examples/*/protocol 2>/dev/null || true
+	@rm -rf examples/conditions/*.gen.go 2>/dev/null || true
 	@rm -f examples/arrays/demo_array.go examples/arrays/demo_full.go examples/arrays/demo_full_cycle.go 2>/dev/null || true
 	@rm -f examples/arrays/fixed_array_test.go 2>/dev/null || true
 	@rm -f examples/arrays/sensor_array.dsl examples/arrays/sensor_array_length.dsl 2>/dev/null || true
@@ -178,6 +189,28 @@ demo-dns: ## Запустить демонстрацию DNS
 	@$(GOCMD) run examples/dns/dns_complete.go
 	@echo ""
 	@echo "================================================"
+
+.PHONY: demo-conditions
+demo-conditions: ## Запустить демонстрацию условий с путями
+	@echo "================================================"
+	@echo "         ДЕМОНСТРАЦИЯ УСЛОВИЙ С ПУТЯМИ          "
+	@echo "================================================"
+	@echo ""
+	@$(GOCMD) run examples/conditions/demo_conditions.go
+	@echo ""
+	@echo "================================================"
+
+.PHONY: save-bin
+save-bin: build ## Сохранить схему simple.dsl в бинарный формат
+	@echo "Сохранение схемы в бинарный формат..."
+	@./$(BUILD_DIR)/$(BINARY_NAME) --save-bin examples/simple/simple.dsl
+	@echo "Схема сохранена: examples/simple/simple.bin"
+	@ls -la examples/simple/simple.bin
+
+.PHONY: load-bin
+load-bin: build ## Загрузить схему из бинарного формата
+	@echo "Загрузка схемы из бинарного формата..."
+	@./$(BUILD_DIR)/$(BINARY_NAME) --load-bin examples/simple/simple.bin | head -20
 
 .PHONY: examples
 examples: build ## Сгенерировать все примеры

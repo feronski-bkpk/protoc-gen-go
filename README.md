@@ -11,8 +11,9 @@
 
 - описать бинарный протокол в декларативном текстовом формате (DSL)
 - автоматически получить строго типизированные Go-структуры
-- сгенерировать методы `MarshalBinary` / `UnmarshalBinary` / `Size`
+- сгенерировать методы `MarshalBinary` / `UnmarshalBinary` / `Size` / `Validate`
 - получить константы смещений для отладки и прямого доступа к полям
+- сохранить схему протокола в компактный бинарный формат
 
 **Не требует внешних зависимостей** — только стандартная библиотека Go.
 
@@ -20,12 +21,15 @@
 
 ```
 DSL (.dsl) → Собственный парсер → AST → Анализатор → Генератор → Go-код (.gen.go)
+                  ↕
+           Бинарный формат (.bin)
 ```
 
 1. Пользователь описывает протокол в файле `.dsl`
 2. Собственный парсер (Recursive Descent) строит AST
 3. Анализатор проверяет семантику и строит таблицу символов
 4. Генератор создаёт Go-файл со структурами и методами сериализации
+5. Схему можно сохранить в `.bin` и восстановить обратно
 
 Порядок байт — **Big Endian** (сетевой порядок).
 
@@ -66,7 +70,11 @@ protoc-gen-go sensor.dsl
 ### CLI
 
 ```bash
-protoc-gen-go <файл.dsl>
+protoc-gen-go <файл.dsl>              # Генерация Go кода
+protoc-gen-go --save-bin <файл.dsl>   # Сохранить схему в .bin
+protoc-gen-go --load-bin <файл.bin>   # Загрузить схему из .bin
+protoc-gen-go -v                      # Версия
+protoc-gen-go -h                      # Справка
 ```
 
 Создаёт `<имя_файла>.gen.go` в той же директории.
@@ -79,9 +87,13 @@ protoc-gen-go <файл.dsl>
 | `make test` | запустить все тесты |
 | `make test-parser` | тесты парсера |
 | `make test-analyzer` | тесты анализатора |
+| `make test-binary` | тесты бинарного формата |
 | `make demo` | демонстрация базового протокола |
 | `make demo-arrays` | демонстрация слайсов |
 | `make demo-dns` | демонстрация DNS |
+| `make demo-conditions` | демонстрация условий с путями |
+| `make save-bin` | сохранить схему в бинарный формат |
+| `make load-bin` | загрузить схему из бинарного формата |
 | `make clean` | удалить артефакты |
 | `make fmt` | форматировать код |
 | `make lint` | запустить go vet |
@@ -160,10 +172,12 @@ samples: []struct {
 
 ```
 extended: uint32 if flags == 1
-error_msg: bytes length_from: error_len if flags == 2
+error_msg: bytes length_from: error_len if flags.ack == 1
 ```
 
-Поддерживаемые операторы: `==`, `!=`, `<`, `>`, `<=`, `>=`.
+Поддерживаются пути: `flags.ack == 1`
+
+Операторы: `==`, `!=`, `<`, `>`, `<=`, `>=`.
 
 ### Комментарии
 
@@ -195,6 +209,7 @@ type SensorData struct {
 func (p *SensorData) Size() int
 func (p *SensorData) MarshalBinary() ([]byte, error)
 func (p *SensorData) UnmarshalBinary(data []byte) error
+func (p *SensorData) Validate() error
 
 // Для битовых полей
 func (p *SensorData) GetAck() bool
@@ -210,6 +225,15 @@ const SensorData_Device_id_Offset = 0
 const SensorData_Device_id_Size   = 4
 ```
 
+### Бинарный формат
+
+Схему протокола можно сохранить в компактный бинарный формат:
+
+```bash
+protoc-gen-go --save-bin sensor.dsl    # создаст sensor.bin
+protoc-gen-go --load-bin sensor.bin    # сгенерирует код из .bin
+```
+
 ## Примеры
 
 | Пример | Описание |
@@ -218,12 +242,14 @@ const SensorData_Device_id_Size   = 4
 | `examples/bitfields/` | Битовые поля и DNS флаги |
 | `examples/arrays/` | Массивы и слайсы |
 | `examples/dns/` | DNS протокол |
+| `examples/conditions/` | Условные поля с путями |
 | `demo/run.go` | Автономное демо |
 
 ```bash
-make demo          # базовый сенсор
-make demo-arrays   # слайсы
-make demo-dns      # DNS протокол
+make demo              # базовый сенсор
+make demo-arrays       # слайсы
+make demo-dns          # DNS протокол
+make demo-conditions   # условия с путями
 ```
 
 ## Структура проекта
@@ -234,11 +260,18 @@ make demo-dns      # DNS протокол
 ├── internal/
 │   ├── ast/               # AST определения
 │   ├── parser/            # Собственный парсер
-│   │   ├── lexer.go       # Лексер
-│   │   ├── token.go       # Токены
+│   │   ├── lexer.go       # Лексер (токенизация)
+│   │   ├── token.go       # Типы токенов
 │   │   └── parser.go      # Recursive Descent парсер
 │   ├── analyzer/          # Семантический анализ
-│   └── generator/         # Генератор Go-кода
+│   │   ├── analyzer.go    # Таблица символов, валидация
+│   │   └── analyzer_test.go
+│   ├── generator/         # Генератор Go-кода
+│   │   └── generator.go   # Size/Marshal/Unmarshal/Validate
+│   └── binary/            # Бинарный формат
+│       ├── types.go       # Константы типов
+│       ├── writer.go      # Сериализация AST → bin
+│       └── reader.go      # Десериализация bin → AST
 ├── pkg/protocol/          # Runtime (опционально)
 ├── examples/              # Примеры DSL
 ├── demo/                  # Демонстрация
@@ -266,9 +299,10 @@ make demo-dns      # DNS протокол
 ### Тесты
 
 ```bash
-make test            # все тесты (парсер + анализатор)
-make test-parser     # только парсер
-make test-analyzer   # только анализатор
+make test            # все тесты (парсер + анализатор + бинарный)
+make test-parser     # только парсер (13 тестов)
+make test-analyzer   # только анализатор (3 теста)
+make test-binary     # бинарный формат
 ```
 
 ### Сборка

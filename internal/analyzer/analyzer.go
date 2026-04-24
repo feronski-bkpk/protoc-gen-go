@@ -7,22 +7,19 @@ import (
 	"github.com/feronski-bkpk/protoc-gen-go/internal/ast"
 )
 
-// Analyzer выполняет семантический анализ протокола
 type Analyzer struct {
 	proto       *ast.Protocol
 	symbolTable map[string]*SymbolInfo
 	errors      []string
 }
 
-// SymbolInfo хранит информацию о символе (поле)
 type SymbolInfo struct {
-	Field  ast.Field // само поле
-	Path   string    // полный путь (например "location.latitude")
-	Offset int       // смещение в байтах
-	Size   int       // размер в байтах
+	Field  ast.Field
+	Path   string
+	Offset int
+	Size   int
 }
 
-// NewAnalyzer создаёт новый анализатор
 func NewAnalyzer(proto *ast.Protocol) *Analyzer {
 	return &Analyzer{
 		proto:       proto,
@@ -30,21 +27,11 @@ func NewAnalyzer(proto *ast.Protocol) *Analyzer {
 	}
 }
 
-// Analyze выполняет полный анализ протокола
 func (a *Analyzer) Analyze() error {
-	// 1. Строим таблицу символов
 	a.buildSymbolTable(a.proto.Fields, "", 0)
-
-	// 2. Вычисляем смещения
 	a.computeOffsets(a.proto.Fields, 0)
-
-	// 3. Проверяем ссылки (length_from)
 	a.validateReferences()
-
-	// 4. Проверяем битовые поля
 	a.validateBitFields()
-
-	// 5. Проверяем циклические зависимости
 	a.validateCycles()
 
 	if len(a.errors) > 0 {
@@ -54,7 +41,6 @@ func (a *Analyzer) Analyze() error {
 	return nil
 }
 
-// buildSymbolTable рекурсивно строит таблицу символов
 func (a *Analyzer) buildSymbolTable(fields []ast.Field, parentPath string, baseOffset int) int {
 	offset := baseOffset
 
@@ -83,6 +69,15 @@ func (a *Analyzer) buildSymbolTable(fields []ast.Field, parentPath string, baseO
 
 		case *ast.BitStructField:
 			info.Size = 1
+			for _, bit := range f.Fields {
+				bitPath := path + "." + bit.Name
+				a.symbolTable[bitPath] = &SymbolInfo{
+					Field:  f,
+					Path:   bitPath,
+					Offset: offset,
+					Size:   1,
+				}
+			}
 			offset += 1
 
 		case *ast.ArrayField:
@@ -102,7 +97,6 @@ func (a *Analyzer) buildSymbolTable(fields []ast.Field, parentPath string, baseO
 	return offset - baseOffset
 }
 
-// computeOffsets вычисляет смещения полей
 func (a *Analyzer) computeOffsets(fields []ast.Field, baseOffset int) {
 	offset := baseOffset
 
@@ -138,7 +132,6 @@ func (a *Analyzer) computeOffsets(fields []ast.Field, baseOffset int) {
 	}
 }
 
-// validateReferences проверяет корректность ссылок length_from
 func (a *Analyzer) validateReferences() {
 	for _, info := range a.symbolTable {
 		switch f := info.Field.(type) {
@@ -162,17 +155,26 @@ func (a *Analyzer) validateReferences() {
 
 		case *ast.ScalarField:
 			if f.Condition != nil {
-				if _, exists := a.symbolTable[f.Condition.Field]; !exists {
-					a.errors = append(a.errors,
-						fmt.Sprintf("поле '%s': условие ссылается на несуществующее поле '%s'",
-							info.Path, f.Condition.Field))
+				condField := f.Condition.Field
+				if _, exists := a.symbolTable[condField]; !exists {
+					parts := strings.Split(condField, ".")
+					if len(parts) > 0 {
+						if _, exists := a.symbolTable[parts[0]]; !exists {
+							a.errors = append(a.errors,
+								fmt.Sprintf("поле '%s': условие ссылается на несуществующее поле '%s'",
+									info.Path, condField))
+						}
+					} else {
+						a.errors = append(a.errors,
+							fmt.Sprintf("поле '%s': условие ссылается на несуществующее поле '%s'",
+								info.Path, condField))
+					}
 				}
 			}
 		}
 	}
 }
 
-// validateBitFields проверяет перекрытие битов в bitstruct
 func (a *Analyzer) validateBitFields() {
 	for _, info := range a.symbolTable {
 		bitField, ok := info.Field.(*ast.BitStructField)
@@ -203,7 +205,6 @@ func (a *Analyzer) validateBitFields() {
 	}
 }
 
-// validateCycles проверяет циклические зависимости в структурах
 func (a *Analyzer) validateCycles() {
 	visited := make(map[string]bool)
 	for _, info := range a.symbolTable {
@@ -243,12 +244,10 @@ func (a *Analyzer) checkCycle(path string, visited map[string]bool) error {
 	return nil
 }
 
-// GetSymbolTable возвращает таблицу символов
 func (a *Analyzer) GetSymbolTable() map[string]*SymbolInfo {
 	return a.symbolTable
 }
 
-// GetFieldOffset возвращает смещение поля по пути
 func (a *Analyzer) GetFieldOffset(path string) (int, error) {
 	info, exists := a.symbolTable[path]
 	if !exists {

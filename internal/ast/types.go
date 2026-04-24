@@ -48,6 +48,9 @@ type ScalarField struct {
 	Type      ScalarType
 	Offset    int
 	Condition *Condition
+	Min       *uint64
+	Max       *uint64
+	Required  bool
 }
 
 func (f *ScalarField) GetName() string { return f.Name }
@@ -84,6 +87,7 @@ type BytesField struct {
 	MaxLength  int
 	Offset     int
 	Condition  *Condition
+	Required   bool
 }
 
 func (f *BytesField) GetName() string { return f.Name }

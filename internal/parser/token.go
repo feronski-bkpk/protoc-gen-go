@@ -31,6 +31,7 @@ const (
 	TokenLParen    // (
 	TokenRParen    // )
 	TokenComma     // ,
+	TokenDot       // .
 
 	// Операторы
 	TokenEq    // ==
@@ -75,6 +76,7 @@ var tokenNames = map[TokenType]string{
 	TokenLParen:     "(",
 	TokenRParen:     ")",
 	TokenComma:      ",",
+	TokenDot:        ".",
 	TokenEq:         "==",
 	TokenNotEq:      "!=",
 	TokenLT:         "<",

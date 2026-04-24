@@ -77,6 +77,8 @@ func (l *Lexer) Tokenize() ([]Token, error) {
 			l.emit(TokenRParen, ")")
 		case ',':
 			l.emit(TokenComma, ",")
+		case '.':
+			l.emit(TokenDot, ".")
 		case '=':
 			if l.peek() == '=' {
 				l.advance()
