@@ -29,6 +29,12 @@ func Format(input string) (string, error) {
 		}
 	}
 
+	if len(proto.Consts) > 0 {
+		for name, val := range proto.Consts {
+			buf.WriteString(fmt.Sprintf("    const %s = %d\n", name, val))
+		}
+	}
+
 	formatFields(&buf, proto.Fields, "    ")
 
 	buf.WriteString("}\n")

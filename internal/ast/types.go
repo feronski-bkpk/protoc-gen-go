@@ -37,6 +37,7 @@ type Protocol struct {
 	Types    map[string]*StructType
 	Enums    map[string]*EnumType
 	Aliases  map[string]string
+	Consts   map[string]int
 	Endian   string
 }
 
@@ -124,6 +125,8 @@ type Condition struct {
 	Operator  string
 	Value     uint64
 	EnumValue string
+	And       *Condition
+	Or        *Condition
 }
 
 type BitFieldSpec struct {

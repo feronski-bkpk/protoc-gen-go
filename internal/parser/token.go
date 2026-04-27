@@ -40,6 +40,9 @@ const (
 	TokenGT
 	TokenLTE
 	TokenGTE
+
+	TokenAnd
+	TokenOr
 )
 
 type Token struct {
@@ -69,6 +72,8 @@ var tokenNames = map[TokenType]string{
 	TokenIf:         "if",
 	TokenLengthFrom: "length_from",
 	TokenLength:     "length",
+	TokenAnd:        "&&",
+	TokenOr:         "||",
 	TokenColon:      ":",
 	TokenSemicolon:  ";",
 	TokenLBrace:     "{",

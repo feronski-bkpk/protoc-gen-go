@@ -13,7 +13,7 @@
 - автоматически получить строго типизированные Go-структуры
 - сгенерировать методы `MarshalBinary` / `UnmarshalBinary` / `Size` / `Validate`
 - получить константы смещений для отладки и прямого доступа к полям
-- сохранить схему протокола в компактный бинарный формат
+- сохранить схему протокола в компактный бинарный формат (`.bin`)
 - форматировать DSL файлы в едином стиле
 
 **Не требует внешних зависимостей** — только стандартная библиотека Go.
@@ -85,19 +85,20 @@ protoc-gen-go -h                      # Справка
 | Команда | Назначение |
 |---------|------------|
 | `make build` | собрать бинарный файл |
-| `make test` | запустить все тесты |
+| `make test` | запустить все тесты (19+) |
 | `make test-parser` | тесты парсера (16 тестов) |
 | `make test-analyzer` | тесты анализатора (3 теста) |
 | `make test-fuzz` | фаззинг-тесты парсера |
 | `make bench` | бенчмарки |
-| `make demo` | демонстрация базового протокола |
-| `make demo-all` | запустить все демонстрации (8 шт) |
+| `make pipeline` | полный тест pipeline |
+| `make demo` | базовая демонстрация |
+| `make demo-all` | все демонстрации (8 шт) |
+| `make demo-protocols` | демо реальных протоколов |
 | `make fmt-dsl` | форматировать все DSL файлы |
 | `make save-bin` | сохранить схему в .bin |
 | `make load-bin` | загрузить схему из .bin |
 | `make examples` | сгенерировать все примеры |
 | `make clean` | удалить артефакты |
-| `make lint` | запустить go vet |
 | `make install` | установить в `$GOPATH/bin` |
 
 ## DSL — синтаксис и правила
@@ -109,6 +110,7 @@ protocol <ИмяПротокола> {
     id: <HexID>
     [endian: big|little]
     [alias <Имя>: <тип>]
+    [const <Имя> = <число>]
     <поле>
     ...
 }
@@ -119,8 +121,18 @@ protocol <ИмяПротокола> {
 ```
 protocol Data {
     id: 0x1000
-    endian: little    // big (по умолчанию) или little
+    endian: little
     value: uint32
+}
+```
+
+### Константы
+
+```
+protocol Config {
+    id: 0x9000
+    const MAX_SIZE = 16
+    buffer: [MAX_SIZE]uint8
 }
 ```
 
@@ -130,10 +142,7 @@ protocol Data {
 protocol Data {
     id: 0x7000
     alias ID: uint32
-    alias Name: bytes
     user_id: ID
-    username: Name length_from: name_len
-    name_len: uint16
 }
 ```
 
@@ -151,8 +160,8 @@ protocol Data {
 
 ```
 flags: bitstruct {
-    ack: bit(7)           // одиночный бит → GetAck() bool, SetAck(bool)
-    opcode: bits[6:3]     // диапазон 4 бита → GetOpcode() uint8, SetOpcode(uint8)
+    ack: bit(7)           // одиночный бит → GetAck() bool
+    opcode: bits[6:3]     // диапазон 4 бита → GetOpcode() uint8
 }
 ```
 
@@ -162,11 +171,9 @@ flags: bitstruct {
 state: enum {
     OK = 0
     ERROR = 1
-    PENDING = 2
 }
+// Можно использовать в условиях: if state == OK
 ```
-
-Генерируется как отдельный тип с константами. Можно использовать в условиях: `if state == OK`.
 
 ### Вложенные структуры
 
@@ -181,38 +188,31 @@ location: struct {
 
 ```
 readings: [10]float32
-points: [5]struct {
-    x: float32
-    y: float32
-}
+points: [5]struct { x: float32; y: float32 }
 ```
 
-### Слайсы (массивы переменной длины)
+### Слайсы (переменная длина)
 
 ```
 readings_len: uint16
 readings: []float32 length: readings_len
-
-samples: []struct {
-    x: float32
-    y: float32
-} length: samples_len
 ```
 
 ### Условные поля
 
 ```
+// Простое условие
 extended: uint32 if flags == 1
+
+// Путь к биту
 error_msg: bytes length_from: error_len if flags.ack == 1
-```
 
-Поддерживаются пути: `flags.ack == 1`. Операторы: `==`, `!=`, `<`, `>`, `<=`, `>=`.
+// Enum значение
+data: bytes length_from: len if state == OK
 
-### Комментарии
-
-```
-// однострочный комментарий
-field: uint16   // после поля
+// Вложенные условия (&&, ||)
+data: bytes length_from: len if flags.ack == 1 && count > 5
+extended: uint32 if flags.error == 0 || flags.ack == 1
 ```
 
 ## Что генерируется
@@ -230,9 +230,6 @@ type SensorData struct {
 }
 ```
 
-Для анонимных структур создаётся тип с суффиксом `Elem` (например, `SamplesElem`).  
-Для enum создаётся отдельный тип с константами.
-
 ### Методы
 
 ```go
@@ -241,11 +238,9 @@ func (p *SensorData) MarshalBinary() ([]byte, error)
 func (p *SensorData) UnmarshalBinary(data []byte) error
 func (p *SensorData) Validate() error
 
-// Для битовых полей
+// Геттеры/сеттеры для битовых полей
 func (p *SensorData) GetAck() bool
 func (p *SensorData) SetAck(val bool)
-func (p *SensorData) GetOpcode() uint8
-func (p *SensorData) SetOpcode(val uint8)
 ```
 
 ### Константы смещений
@@ -257,28 +252,36 @@ const SensorData_Device_id_Size   = 4
 
 ## Примеры
 
+### Учебные примеры
+
 | Пример | Описание |
 |--------|----------|
 | `examples/simple/` | Базовые типы и структуры |
-| `examples/bitfields/` | Битовые поля и DNS флаги |
+| `examples/bitfields/` | Битовые поля |
 | `examples/arrays/` | Массивы и слайсы |
-| `examples/dns/` | DNS протокол |
-| `examples/conditions/` | Условные поля с путями |
+| `examples/conditions/` | Условные поля с путями, &&, \|\| |
 | `examples/enums/` | Enum-типы |
 | `examples/little_endian/` | LittleEndian |
 | `examples/aliases/` | Алиасы типов |
+| `examples/consts/` | Константы |
+
+### Реальные протоколы
+
+| Протокол | Файл | Особенности |
+|----------|------|-------------|
+| MQTT CONNECT | `examples/mqtt/connect.dsl` | IoT, битовые поля, bytes |
+| Modbus RTU | `examples/modbus/rtu.dsl` | Промышленный, вложенные условия \|\| |
+| TCP Header | `examples/tcp/header.dsl` | Два bitstruct, условный слайс |
+| Ethernet Frame | `examples/ethernet/frame.dsl` | Фиксированные массивы |
+| HTTP Request | `examples/http/request.dsl` | Enum + вложенные условия |
+| DNS Header | `examples/dns/dns.dsl` | Сетевой протокол |
 
 ```bash
 make demo              # базовый сенсор
-make demo-arrays       # слайсы
-make demo-dns          # DNS протокол
-make demo-conditions   # условия с путями
-make demo-enum         # enum-типы
-make demo-endian       # LittleEndian
-make demo-aliases      # алиасы
+make demo-protocols    # все реальные протоколы
 make demo-all          # все демо
+make pipeline          # полный тест
 ```
-
 
 ## Структура проекта
 
@@ -288,33 +291,33 @@ make demo-all          # все демо
 ├── internal/
 │   ├── ast/               # AST определения
 │   ├── parser/            # Собственный парсер
-│   │   ├── lexer.go       # Лексер (токенизация)
+│   │   ├── lexer.go       # Лексер
 │   │   ├── token.go       # Типы токенов
 │   │   └── parser.go      # Recursive Descent парсер
 │   ├── analyzer/          # Семантический анализ
-│   │   ├── analyzer.go    # Таблица символов, валидация
-│   │   └── analyzer_test.go
 │   ├── generator/         # Генератор Go-кода
-│   │   └── generator.go   # Size/Marshal/Unmarshal/Validate
 │   ├── binary/            # Бинарный формат
-│   │   ├── types.go       # Константы типов
-│   │   ├── writer.go      # Сериализация AST → bin
-│   │   └── reader.go      # Десериализация bin → AST
 │   └── formatter/         # Форматтер DSL
-│       └── formatter.go   # Форматирование DSL
 ├── examples/              # Примеры DSL
-│   ├── simple/            # Базовые примеры
+│   ├── simple/            # Базовые
 │   ├── bitfields/         # Битовые поля
-│   ├── arrays/            # Массивы и слайсы
-│   ├── dns/               # DNS протокол
-│   ├── conditions/        # Условные поля
-│   ├── enums/             # Enum-типы
+│   ├── arrays/            # Массивы
+│   ├── conditions/        # Условия
+│   ├── enums/             # Enum
 │   ├── little_endian/     # LittleEndian
-│   └── aliases/           # Алиасы типов
-├── demo/                  # Демонстрация (run.go)
+│   ├── aliases/           # Алиасы
+│   ├── consts/            # Константы
+│   ├── dns/               # DNS
+│   ├── mqtt/              # MQTT
+│   ├── modbus/            # Modbus
+│   ├── tcp/               # TCP
+│   ├── ethernet/          # Ethernet
+│   └── http/              # HTTP
+├── demo/                  # Демонстрации
 ├── docs/                  # Документация
 │   ├── grammar.md         # BNF-грамматика
-│   └── parser.md          # Архитектура парсера
+│   ├── parser.md          # Архитектура парсера
+│   └── tutorial.md        # Туториал
 ├── testdata/              # Данные для тестов
 ├── .github/workflows/     # CI/CD
 ├── Makefile
@@ -325,6 +328,7 @@ make demo-all          # все демо
 
 ## Документация
 
+- [Туториал](docs/tutorial.md) — пошаговое руководство
 - [Грамматика DSL](docs/grammar.md) — полная BNF-нотация
 - [Архитектура парсера](docs/parser.md) — описание компонентов
 

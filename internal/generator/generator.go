@@ -24,6 +24,20 @@ func (g *Generator) Generate() (string, error) {
 	buf.WriteString("package protocol\n\n")
 
 	needsBinary, needsMath, needsFmt := g.checkNeededImports(g.proto.Fields)
+
+	if !needsFmt {
+		for _, field := range g.proto.Fields {
+			if _, ok := field.(*ast.StructField); ok {
+				needsFmt = true
+				break
+			}
+			if arr, ok := field.(*ast.ArrayField); ok && arr.FixedLength > 0 {
+				needsFmt = true
+				break
+			}
+		}
+	}
+
 	if needsBinary || needsMath || needsFmt {
 		buf.WriteString("import (\n")
 		if needsFmt {
@@ -101,11 +115,14 @@ func (g *Generator) checkNeededImports(fields []ast.Field) (bool, bool, bool) {
 			needsBinary = needsBinary || b
 			needsMath = needsMath || m
 			needsFmt = needsFmt || ft
+			needsFmt = true
 		case *ast.ArrayField:
-			b, m, ft := g.checkNeededImports([]ast.Field{f.ElementType})
+			b, m, _ := g.checkNeededImports([]ast.Field{f.ElementType})
 			needsBinary = needsBinary || b
 			needsMath = needsMath || m
-			needsFmt = needsFmt || ft
+			if f.FixedLength > 0 {
+				needsFmt = true
+			}
 		case *ast.BytesField:
 			if f.MaxLength > 0 || f.Required {
 				needsFmt = true
@@ -329,13 +346,15 @@ func (g *Generator) generateSizeMethod(structName string, fields []ast.Field) st
 				elemSize := f.ElementType.GetSize()
 				buf.WriteString(fmt.Sprintf("    size += %d * %d // %s\n", f.FixedLength, elemSize, fieldName))
 			} else {
-				buf.WriteString(fmt.Sprintf("    for i := range p.%s {\n", fieldName))
 				if _, ok := f.ElementType.(*ast.ScalarField); ok {
+					buf.WriteString(fmt.Sprintf("    for range p.%s {\n", fieldName))
 					buf.WriteString(fmt.Sprintf("        size += %d\n", f.ElementType.GetSize()))
+					buf.WriteString("    }\n")
 				} else {
+					buf.WriteString(fmt.Sprintf("    for i := range p.%s {\n", fieldName))
 					buf.WriteString(fmt.Sprintf("        size += p.%s[i].Size()\n", fieldName))
+					buf.WriteString("    }\n")
 				}
-				buf.WriteString("    }\n")
 			}
 		case *ast.BytesField:
 			if f.Condition != nil {
@@ -720,7 +739,52 @@ func (g *Generator) generateUnmarshalScalar(fieldName string, scalarType ast.Sca
 }
 
 func (g *Generator) conditionToGo(cond *ast.Condition) string {
+	result := g.singleConditionToGo(cond)
+
+	if cond.And != nil {
+		result += " && " + g.conditionToGo(cond.And)
+	} else if cond.Or != nil {
+		result += " || " + g.conditionToGo(cond.Or)
+	}
+
+	return result
+}
+
+func (g *Generator) singleConditionToGo(cond *ast.Condition) string {
 	parts := strings.Split(cond.Field, ".")
+
+	if len(parts) == 2 {
+		rootField := parts[0]
+		for _, field := range g.proto.Fields {
+			if _, ok := field.(*ast.BitStructField); ok {
+				if capitalize(field.GetName()) == capitalize(rootField) {
+					methodName := "Get" + capitalize(parts[1]) + "()"
+
+					if cond.Operator == "==" {
+						if cond.Value == 1 {
+							return "p." + methodName
+						} else if cond.Value == 0 {
+							return "!p." + methodName
+						}
+					}
+					if cond.Operator == "!=" {
+						if cond.Value == 0 {
+							return "p." + methodName
+						} else if cond.Value == 1 {
+							return "!p." + methodName
+						}
+					}
+
+					fieldPath := "p." + methodName
+					if cond.EnumValue != "" {
+						return fmt.Sprintf("%s %s %s", fieldPath, cond.Operator, cond.EnumValue)
+					}
+					return fmt.Sprintf("%s %s %d", fieldPath, cond.Operator, cond.Value)
+				}
+			}
+		}
+	}
+
 	var goPath []string
 	for _, part := range parts {
 		goPath = append(goPath, capitalize(part))
@@ -730,7 +794,6 @@ func (g *Generator) conditionToGo(cond *ast.Condition) string {
 	if cond.EnumValue != "" {
 		return fmt.Sprintf("%s %s %s", fieldPath, cond.Operator, cond.EnumValue)
 	}
-
 	return fmt.Sprintf("%s %s %d", fieldPath, cond.Operator, cond.Value)
 }
 

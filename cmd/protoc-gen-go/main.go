@@ -167,6 +167,24 @@ func printUsage() {
   protoc-gen-go --load-bin protocol.bin`)
 }
 
+func printCondition(cond *ast.Condition) string {
+	if cond == nil {
+		return ""
+	}
+	var result string
+	if cond.EnumValue != "" {
+		result = fmt.Sprintf("%s %s %s", cond.Field, cond.Operator, cond.EnumValue)
+	} else {
+		result = fmt.Sprintf("%s %s %d", cond.Field, cond.Operator, cond.Value)
+	}
+	if cond.And != nil {
+		result += " && " + printCondition(cond.And)
+	} else if cond.Or != nil {
+		result += " || " + printCondition(cond.Or)
+	}
+	return result
+}
+
 func printFields(fields []ast.Field, indent int) {
 	prefix := ""
 	for i := 0; i < indent; i++ {
@@ -178,7 +196,7 @@ func printFields(fields []ast.Field, indent int) {
 		case *ast.ScalarField:
 			fmt.Printf("%s- %s: %s", prefix, f.Name, f.Type)
 			if f.Condition != nil {
-				fmt.Printf(" [если %s %s %d]", f.Condition.Field, f.Condition.Operator, f.Condition.Value)
+				fmt.Printf(" [если %s]", printCondition(f.Condition))
 			}
 			fmt.Println()
 
@@ -187,7 +205,7 @@ func printFields(fields []ast.Field, indent int) {
 			printFields(f.Struct.Fields, indent+1)
 			fmt.Printf("%s  }", prefix)
 			if f.Condition != nil {
-				fmt.Printf(" [если %s %s %d]", f.Condition.Field, f.Condition.Operator, f.Condition.Value)
+				fmt.Printf(" [если %s]", printCondition(f.Condition))
 			}
 			fmt.Println()
 
@@ -202,7 +220,7 @@ func printFields(fields []ast.Field, indent int) {
 			}
 			fmt.Printf("%s  }", prefix)
 			if f.Condition != nil {
-				fmt.Printf(" [если %s %s %d]", f.Condition.Field, f.Condition.Operator, f.Condition.Value)
+				fmt.Printf(" [если %s]", printCondition(f.Condition))
 			}
 			fmt.Println()
 
@@ -222,7 +240,7 @@ func printFields(fields []ast.Field, indent int) {
 				fmt.Printf(" (длина из: %s)", f.LengthFrom)
 			}
 			if f.Condition != nil {
-				fmt.Printf(" [если %s %s %d]", f.Condition.Field, f.Condition.Operator, f.Condition.Value)
+				fmt.Printf(" [если %s]", printCondition(f.Condition))
 			}
 			fmt.Println()
 
@@ -238,7 +256,7 @@ func printFields(fields []ast.Field, indent int) {
 			}
 			fmt.Printf("}")
 			if f.Condition != nil {
-				fmt.Printf(" [если %s %s %d]", f.Condition.Field, f.Condition.Operator, f.Condition.Value)
+				fmt.Printf(" [если %s]", printCondition(f.Condition))
 			}
 			fmt.Println()
 
@@ -248,7 +266,7 @@ func printFields(fields []ast.Field, indent int) {
 				fmt.Printf(" (длина из: %s)", f.LengthFrom)
 			}
 			if f.Condition != nil {
-				fmt.Printf(" [если %s %s %d]", f.Condition.Field, f.Condition.Operator, f.Condition.Value)
+				fmt.Printf(" [если %s]", printCondition(f.Condition))
 			}
 			fmt.Println()
 		}

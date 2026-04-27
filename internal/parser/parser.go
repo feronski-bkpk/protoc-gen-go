@@ -13,6 +13,7 @@ type Parser struct {
 	tokens  []Token
 	pos     int
 	aliases map[string]string
+	consts  map[string]int
 	context string
 }
 
@@ -126,6 +127,19 @@ func (p *Parser) parseProtocol() (*ast.Protocol, error) {
 		p.aliases[aliasName.Value] = baseType.Value
 	}
 
+	p.consts = make(map[string]int)
+	for p.current().Value == "const" {
+		p.setContext("константы")
+		p.advance()
+		constName := p.expect(TokenIdent)
+		if !p.match(TokenEqAssign) {
+			return nil, p.error("ожидался '='")
+		}
+		constValue := p.expect(TokenNumber)
+		val, _ := strconv.Atoi(constValue.Value)
+		p.consts[constName.Value] = val
+	}
+
 	p.setContext("полей протокола")
 	fields, err := p.parseFields()
 	if err != nil {
@@ -142,6 +156,7 @@ func (p *Parser) parseProtocol() (*ast.Protocol, error) {
 		Fields:   fields,
 		Types:    make(map[string]*ast.StructType),
 		Aliases:  p.aliases,
+		Consts:   p.consts,
 		Endian:   endian,
 	}, nil
 }
@@ -328,12 +343,28 @@ func (p *Parser) parseArrayField(name string) (ast.Field, error) {
 		return p.parseSliceField(name)
 	}
 
-	sizeTok := p.expect(TokenNumber)
+	var size int
+	if p.current().Type == TokenNumber {
+		sizeTok := p.expect(TokenNumber)
+		size, _ = strconv.Atoi(sizeTok.Value)
+	} else if p.current().Type == TokenIdent {
+		constName := p.expectIdent()
+		if p.consts != nil {
+			if val, ok := p.consts[constName]; ok {
+				size = val
+			} else {
+				return nil, p.error("неизвестная константа: " + constName)
+			}
+		} else {
+			return nil, p.error("константы не поддерживаются")
+		}
+	} else {
+		return nil, p.error("ожидалось число или константа")
+	}
+
 	if !p.match(TokenRBracket) {
 		return nil, p.error("ожидался ']'")
 	}
-
-	size, _ := strconv.Atoi(sizeTok.Value)
 
 	if p.match(TokenStruct) {
 		if !p.match(TokenLBrace) {
@@ -513,6 +544,29 @@ func (p *Parser) parseEnumField(name string) (ast.Field, error) {
 }
 
 func (p *Parser) parseCondition() (*ast.Condition, error) {
+	cond, err := p.parseSingleCondition()
+	if err != nil {
+		return nil, err
+	}
+
+	if p.match(TokenAnd) {
+		next, err := p.parseCondition()
+		if err != nil {
+			return nil, err
+		}
+		cond.And = next
+	} else if p.match(TokenOr) {
+		next, err := p.parseCondition()
+		if err != nil {
+			return nil, err
+		}
+		cond.Or = next
+	}
+
+	return cond, nil
+}
+
+func (p *Parser) parseSingleCondition() (*ast.Condition, error) {
 	var parts []string
 	parts = append(parts, p.expectIdent())
 

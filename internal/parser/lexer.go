@@ -104,6 +104,20 @@ func (l *Lexer) Tokenize() ([]Token, error) {
 			} else {
 				l.emit(TokenGT, ">")
 			}
+		case '&':
+			if l.peek() == '&' {
+				l.advance()
+				l.emit(TokenAnd, "&&")
+			} else {
+				return nil, fmt.Errorf("неожиданный символ '&' на %d:%d", l.line, l.col)
+			}
+		case '|':
+			if l.peek() == '|' {
+				l.advance()
+				l.emit(TokenOr, "||")
+			} else {
+				return nil, fmt.Errorf("неожиданный символ '|' на %d:%d", l.line, l.col)
+			}
 		default:
 			return nil, fmt.Errorf("неожиданный символ '%c' на %d:%d", ch, l.line, l.col)
 		}
