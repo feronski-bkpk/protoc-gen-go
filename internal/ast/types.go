@@ -36,6 +36,7 @@ type Protocol struct {
 	Fields   []Field
 	Types    map[string]*StructType
 	Enums    map[string]*EnumType
+	Aliases  map[string]string
 	Endian   string
 }
 
@@ -67,13 +68,14 @@ type Field interface {
 }
 
 type ScalarField struct {
-	Name      string
-	Type      ScalarType
-	Offset    int
-	Condition *Condition
-	Min       *uint64
-	Max       *uint64
-	Required  bool
+	Name         string
+	Type         ScalarType
+	OriginalType string
+	Offset       int
+	Condition    *Condition
+	Min          *uint64
+	Max          *uint64
+	Required     bool
 }
 
 func (f *ScalarField) GetName() string { return f.Name }
@@ -118,9 +120,10 @@ func (f *BytesField) GetType() string { return "[]byte" }
 func (f *BytesField) GetSize() int    { return 0 }
 
 type Condition struct {
-	Field    string
-	Operator string
-	Value    uint64
+	Field     string
+	Operator  string
+	Value     uint64
+	EnumValue string
 }
 
 type BitFieldSpec struct {

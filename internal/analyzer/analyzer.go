@@ -170,6 +170,8 @@ func (a *Analyzer) validateReferences() {
 								info.Path, condField))
 					}
 				}
+				if f.Condition.EnumValue != "" {
+				}
 			}
 		}
 	}

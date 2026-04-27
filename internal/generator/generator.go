@@ -726,6 +726,11 @@ func (g *Generator) conditionToGo(cond *ast.Condition) string {
 		goPath = append(goPath, capitalize(part))
 	}
 	fieldPath := "p." + strings.Join(goPath, ".")
+
+	if cond.EnumValue != "" {
+		return fmt.Sprintf("%s %s %s", fieldPath, cond.Operator, cond.EnumValue)
+	}
+
 	return fmt.Sprintf("%s %s %d", fieldPath, cond.Operator, cond.Value)
 }
 

@@ -18,16 +18,20 @@ func TestLexer_HexNumber(t *testing.T) {
 }
 
 func TestLexer_Keywords(t *testing.T) {
-	lexer := NewLexer("protocol struct bitstruct id if length_from length")
+	lexer := NewLexer("protocol struct bitstruct enum alias id if length_from length endian")
 	tokens, err := lexer.Tokenize()
 	require.NoError(t, err)
+	assert.Equal(t, 10, len(tokens))
 	assert.Equal(t, TokenProtocol, tokens[0].Type)
 	assert.Equal(t, TokenStruct, tokens[1].Type)
 	assert.Equal(t, TokenBitStruct, tokens[2].Type)
-	assert.Equal(t, TokenID, tokens[3].Type)
-	assert.Equal(t, TokenIf, tokens[4].Type)
-	assert.Equal(t, TokenLengthFrom, tokens[5].Type)
-	assert.Equal(t, TokenLength, tokens[6].Type)
+	assert.Equal(t, TokenEnum, tokens[3].Type)
+	assert.Equal(t, TokenIdent, tokens[4].Type) // alias
+	assert.Equal(t, TokenIdent, tokens[5].Type) // id
+	assert.Equal(t, TokenIf, tokens[6].Type)
+	assert.Equal(t, TokenLengthFrom, tokens[7].Type)
+	assert.Equal(t, TokenLength, tokens[8].Type)
+	assert.Equal(t, TokenIdent, tokens[9].Type) // endian
 }
 
 func TestLexer_Operators(t *testing.T) {

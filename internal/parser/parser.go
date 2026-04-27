@@ -141,6 +141,7 @@ func (p *Parser) parseProtocol() (*ast.Protocol, error) {
 		PacketID: uint16(packetID),
 		Fields:   fields,
 		Types:    make(map[string]*ast.StructType),
+		Aliases:  p.aliases,
 		Endian:   endian,
 	}, nil
 }
@@ -189,6 +190,7 @@ func (p *Parser) parseField() (ast.Field, error) {
 
 	case p.isType():
 		typeName := p.current().Value
+		originalType := typeName
 		p.advance()
 
 		if p.aliases != nil {
@@ -202,8 +204,9 @@ func (p *Parser) parseField() (ast.Field, error) {
 		}
 
 		field := &ast.ScalarField{
-			Name: nameTok.Value,
-			Type: ast.ScalarType(typeName),
+			Name:         nameTok.Value,
+			Type:         ast.ScalarType(typeName),
+			OriginalType: originalType,
 		}
 
 		if p.match(TokenIf) {
@@ -354,6 +357,7 @@ func (p *Parser) parseArrayField(name string) (ast.Field, error) {
 	}
 
 	typeName := p.expectIdent()
+	originalType := typeName
 
 	if p.aliases != nil {
 		if baseType, ok := p.aliases[typeName]; ok {
@@ -361,11 +365,14 @@ func (p *Parser) parseArrayField(name string) (ast.Field, error) {
 		}
 	}
 
+	elemField := &ast.ScalarField{
+		Type:         ast.ScalarType(typeName),
+		OriginalType: originalType,
+	}
+
 	return &ast.ArrayField{
-		Name: name,
-		ElementType: &ast.ScalarField{
-			Type: ast.ScalarType(typeName),
-		},
+		Name:        name,
+		ElementType: elemField,
 		FixedLength: size,
 	}, nil
 }
@@ -404,6 +411,7 @@ func (p *Parser) parseSliceField(name string) (ast.Field, error) {
 	}
 
 	typeName := p.expectIdent()
+	originalType := typeName
 
 	if p.aliases != nil {
 		if baseType, ok := p.aliases[typeName]; ok {
@@ -411,11 +419,14 @@ func (p *Parser) parseSliceField(name string) (ast.Field, error) {
 		}
 	}
 
+	elemField := &ast.ScalarField{
+		Type:         ast.ScalarType(typeName),
+		OriginalType: originalType,
+	}
+
 	field := &ast.ArrayField{
-		Name: name,
-		ElementType: &ast.ScalarField{
-			Type: ast.ScalarType(typeName),
-		},
+		Name:        name,
+		ElementType: elemField,
 	}
 
 	if p.match(TokenLength) || p.match(TokenLengthFrom) {
@@ -530,20 +541,24 @@ func (p *Parser) parseCondition() (*ast.Condition, error) {
 	}
 
 	var val uint64
+	var enumValue string
 	tok := p.current()
 	if tok.Type == TokenNumber {
 		val, _ = strconv.ParseUint(tok.Value, 10, 64)
 	} else if tok.Type == TokenHexNumber {
 		val, _ = strconv.ParseUint(tok.Value[2:], 16, 64)
+	} else if tok.Type == TokenIdent {
+		enumValue = tok.Value
 	} else {
-		return nil, p.error("ожидалось число")
+		return nil, p.error("ожидалось число или идентификатор")
 	}
 	p.advance()
 
 	return &ast.Condition{
-		Field:    fieldPath,
-		Operator: op,
-		Value:    val,
+		Field:     fieldPath,
+		Operator:  op,
+		Value:     val,
+		EnumValue: enumValue,
 	}, nil
 }
 

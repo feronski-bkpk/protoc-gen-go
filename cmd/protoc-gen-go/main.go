@@ -10,6 +10,7 @@ import (
 	"github.com/feronski-bkpk/protoc-gen-go/internal/analyzer"
 	"github.com/feronski-bkpk/protoc-gen-go/internal/ast"
 	"github.com/feronski-bkpk/protoc-gen-go/internal/binary"
+	"github.com/feronski-bkpk/protoc-gen-go/internal/formatter"
 	"github.com/feronski-bkpk/protoc-gen-go/internal/generator"
 	"github.com/feronski-bkpk/protoc-gen-go/internal/parser"
 )
@@ -32,6 +33,22 @@ func main() {
 
 	if os.Args[1] == "-h" || os.Args[1] == "--help" {
 		printUsage()
+		os.Exit(0)
+	}
+
+	if os.Args[1] == "fmt" {
+		if len(os.Args) < 3 {
+			log.Fatal("Использование: protoc-gen-go fmt <файл.dsl>")
+		}
+		data, err := os.ReadFile(os.Args[2])
+		if err != nil {
+			log.Fatalf("Ошибка чтения файла: %v", err)
+		}
+		result, err := formatter.Format(string(data))
+		if err != nil {
+			log.Fatalf("Ошибка форматирования: %v", err)
+		}
+		fmt.Print(result)
 		os.Exit(0)
 	}
 
@@ -136,14 +153,16 @@ func printUsage() {
 	fmt.Println(`protoc-gen-go - Генератор протоколов из DSL в Go
 
 Использование:
-  protoc-gen-go <файл.dsl>       Сгенерировать Go код из DSL файла
-  protoc-gen-go --save-bin <файл.dsl>  Сохранить схему в бинарный формат
-  protoc-gen-go --load-bin <файл.bin>  Загрузить схему из бинарного формата
-  protoc-gen-go -v, --version     Показать версию
-  protoc-gen-go -h, --help        Показать справку
+  protoc-gen-go <файл.dsl>              Генерация Go кода
+  protoc-gen-go fmt <файл.dsl>          Форматировать DSL файл
+  protoc-gen-go --save-bin <файл.dsl>   Сохранить схему в .bin
+  protoc-gen-go --load-bin <файл.bin>   Загрузить схему из .bin
+  protoc-gen-go -v, --version           Показать версию
+  protoc-gen-go -h, --help              Показать справку
 
 Примеры:
   protoc-gen-go protocol.dsl
+  protoc-gen-go fmt protocol.dsl
   protoc-gen-go --save-bin protocol.dsl
   protoc-gen-go --load-bin protocol.bin`)
 }

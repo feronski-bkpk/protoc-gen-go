@@ -45,11 +45,13 @@ help:
 	@echo "  make test               # Запустить все тесты"
 	@echo "  make test-parser        # Тесты парсера"
 	@echo "  make test-analyzer      # Тесты анализатора"
-	@echo "  make test-fuzz          # Фаззинг-тесты парсера"
+	@echo "  make test-fuzz          # Фаззинг-тесты"
 	@echo "  make bench              # Бенчмарки"
-	@echo "  make demo               # Демонстрация"
+	@echo "  make demo               # Базовое демо"
 	@echo "  make demo-all           # Все демонстрации"
+	@echo "  make fmt-dsl            # Форматировать DSL"
 	@echo "  make save-bin           # Сохранить схему в .bin"
+	@echo "  make load-bin           # Загрузить схему из .bin"
 	@echo "  make examples           # Сгенерировать все примеры"
 	@echo "  make install            # Установить в GOPATH/bin"
 
@@ -61,10 +63,19 @@ deps: ## Загрузить и упорядочить зависимости
 	@echo "Зависимости готовы"
 
 .PHONY: fmt
-fmt: ## Форматировать код Go
+fmt: ## Форматировать код Go (go fmt)
 	@echo "Форматирование кода..."
 	@$(GOFMT) ./cmd/... ./internal/... ./pkg/...
 	@echo "Код отформатирован"
+
+.PHONY: fmt-dsl
+fmt-dsl: build ## Форматировать DSL файл (protoc-gen-go fmt)
+	@echo "Форматирование DSL..."
+	@for dsl in examples/*/*.dsl; do \
+		echo "  Форматирование $$dsl..."; \
+		./$(BUILD_DIR)/$(BINARY_NAME) fmt "$$dsl" > /tmp/fmt_dsl.tmp && mv /tmp/fmt_dsl.tmp "$$dsl"; \
+	done
+	@echo "Все DSL файлы отформатированы"
 
 .PHONY: lint
 lint: ## Запустить линтеры (vet)
@@ -90,8 +101,8 @@ test-binary: ## Запустить тесты бинарного формата
 	@cd internal/binary && $(GOTEST) -v 2>/dev/null || echo "Тесты бинарного формата пока не созданы"
 
 .PHONY: test-fuzz
-test-fuzz: ## Запустить фаззинг-тесты парсера
-	@echo "Фаззинг-тесты парсера (30 секунд)..."
+test-fuzz: ## Запустить фаззинг-тесты парсера (30 секунд)
+	@echo "Фаззинг-тесты парсера..."
 	@cd internal/parser && $(GOTEST) -fuzz=FuzzParser -fuzztime=30s 2>/dev/null || echo "Фаззинг-тесты требуют Go 1.18+"
 
 .PHONY: test
@@ -133,6 +144,7 @@ clean: ## Очистить артефакты сборки и сгенериро
 	@rm -rf $(BUILD_DIR)/
 	@rm -f coverage.out coverage.html
 	@rm -f test.gen.go test.dsl test_complete.dsl test_minimal.dsl test_error.dsl
+	@rm -f test_fmt.dsl test_fmt_complex.dsl test_fmt_advanced.dsl test_fmt_cond.dsl
 	@rm -f demo/*.gen.go demo/protocol/*.gen.go 2>/dev/null || true
 	@rm -f examples/*/*.gen.go 2>/dev/null || true
 	@rm -f testdata/*.gen.go testdata/protocol/*.gen.go 2>/dev/null || true
@@ -226,8 +238,8 @@ demo-aliases: ## Запустить демонстрацию алиасов
 	@echo "         ДЕМОНСТРАЦИЯ АЛИАСОВ                   "
 	@echo "================================================"
 	@echo ""
-	@echo "Для алиасов используется кодогенерация."
-	@echo "Сгенерированный код: examples/aliases/data.gen.go"
+	@echo "Алиасы: examples/aliases/data.dsl"
+	@cat examples/aliases/data.gen.go 2>/dev/null | head -20 || echo "(сгенерируйте: protoc-gen-go examples/aliases/data.dsl)"
 	@echo "================================================"
 
 .PHONY: demo-all
