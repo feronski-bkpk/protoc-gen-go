@@ -181,9 +181,6 @@ install: build ## Установить бинарный файл
 		mkdir -p "$$GOPATH/bin"; \
 		cp $(BUILD_DIR)/$(BINARY_NAME) "$$GOPATH/bin/"; \
 		echo "Установлено в $$GOPATH/bin/$(BINARY_NAME)"; \
-		echo ""; \
-		echo "Добавьте в ~/.bashrc или ~/.zshrc:"; \
-		echo "  export PATH=\$$PATH:$$GOPATH/bin"; \
 	fi
 
 # ============================================================================
