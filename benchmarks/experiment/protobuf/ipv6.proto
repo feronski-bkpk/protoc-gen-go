@@ -1,0 +1,48 @@
+syntax = "proto3";
+package ipv6;
+
+option go_package = "github.com/feronski-bkpk/protoc-gen-go/benchmarks/experiment/protobuf";
+
+message Ipv6BaseHeader {
+  uint32 version_tc = 1;
+  uint32 tc_flow = 2;
+  uint32 flow_label_low = 3;
+  uint32 payload_length = 4;
+  uint32 next_header = 5;
+  uint32 hop_limit = 6;
+  bytes src_addr = 7;
+  bytes dst_addr = 8;
+}
+
+message Ipv6HopByHop {
+  uint32 next_header = 1;
+  uint32 hdr_ext_len = 2;
+  bytes options = 3;
+}
+
+message Ipv6Fragment {
+  uint32 next_header = 1;
+  uint32 reserved = 2;
+  uint32 offset_flags = 3;
+  uint32 offset_low = 4;
+  uint32 identification = 5;
+}
+
+message Ipv6DestOpts {
+  uint32 next_header = 1;
+  uint32 hdr_ext_len = 2;
+  bytes options = 3;
+}
+
+message Ipv6Routing {
+  uint32 next_header = 1;
+  uint32 hdr_ext_len = 2;
+  uint32 routing_type = 3;
+  uint32 segments_left = 4;
+  bytes reserved = 5;
+}
+
+message Payload {
+  uint32 data_len = 1;
+  bytes data = 2;
+}

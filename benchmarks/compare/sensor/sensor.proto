@@ -1,0 +1,12 @@
+syntax = "proto3";
+package sensor;
+
+option go_package = "github.com/feronski-bkpk/protoc-gen-go/benchmarks/compare/sensor";
+
+message SensorData {
+  uint32 device_id = 1;
+  float temperature = 2;
+  float humidity = 3;
+  uint32 readings_len = 4;
+  repeated float readings = 5;
+}

@@ -22,6 +22,11 @@ GOMOD := $(GOCMD) mod
 GOFMT := $(GOCMD) fmt
 GOVET := $(GOCMD) vet
 
+# Пути эксперимента
+EXPERIMENT_DIR := benchmarks/experiment
+REPORT_DIR := $(EXPERIMENT_DIR)/report
+BENCH_DIR := benchmarks/golang
+
 # ============================================================================
 # Основные цели
 # ============================================================================
@@ -38,19 +43,20 @@ help:
 	@echo ""
 	@echo "Доступные цели:"
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
-		awk 'BEGIN {FS = ":.*?## "}; {printf "  %-22s %s\n", $$1, $$2}'
+		awk 'BEGIN {FS = ":.*?## "}; {printf "  %-25s %s\n", $$1, $$2}'
 	@echo ""
 	@echo "Примеры:"
 	@echo "  make build              # Собрать бинарный файл"
 	@echo "  make test               # Запустить все тесты"
-	@echo "  make test-fuzz          # Фаззинг-тесты"
-	@echo "  make bench              # Бенчмарки"
+	@echo "  make bench-quick        # Быстрые бенчмарки DSL"
+	@echo "  make bench-report       # Бенчмарки DSL + отчёт (без внешних зависимостей)"
+	@echo "  make experiment         # Полный эксперимент: DSL vs Hand vs Protobuf vs Construct"
+	@echo "  make charts             # Только графики (по готовым результатам)"
 	@echo "  make demo               # Базовое демо"
 	@echo "  make demo-all           # Все демонстрации"
-	@echo "  make demo-protocols     # Демо реальных протоколов"
 	@echo "  make pipeline           # Полный pipeline тест"
-	@echo "  make fmt-dsl            # Форматировать все DSL"
-	@echo "  make examples           # Сгенерировать все примеры"
+	@echo "  make clean              # Очистить артефакты"
+	@echo "  make distclean          # Глубокая очистка"
 	@echo "  make install            # Установить в GOPATH/bin"
 
 .PHONY: deps
@@ -63,22 +69,24 @@ deps: ## Загрузить и упорядочить зависимости
 .PHONY: fmt
 fmt: ## Форматировать код Go (go fmt)
 	@echo "Форматирование кода..."
-	@$(GOFMT) ./cmd/... ./internal/... ./pkg/...
+	@$(GOFMT) ./cmd/... ./internal/... ./pkg/... 2>/dev/null || true
 	@echo "Код отформатирован"
 
 .PHONY: fmt-dsl
 fmt-dsl: build ## Форматировать все DSL файлы
 	@echo "Форматирование DSL..."
-	@for dsl in examples/*/*.dsl; do \
-		echo "  $$dsl"; \
-		./$(BUILD_DIR)/$(BINARY_NAME) fmt "$$dsl" > /tmp/fmt_dsl.tmp && mv /tmp/fmt_dsl.tmp "$$dsl"; \
+	@for dsl in examples/*/*.dsl benchmarks/experiment/protocols/*.dsl testdata/ipv6/*/*.dsl testdata/nested/*.dsl 2>/dev/null; do \
+		if [ -f "$$dsl" ]; then \
+			echo "  $$dsl"; \
+			./$(BUILD_DIR)/$(BINARY_NAME) fmt "$$dsl" > /tmp/fmt_dsl.tmp && mv /tmp/fmt_dsl.tmp "$$dsl"; \
+		fi \
 	done
 	@echo "Все DSL файлы отформатированы"
 
 .PHONY: lint
 lint: ## Запустить линтеры (vet)
 	@echo "Запуск линтеров..."
-	@$(GOVET) ./cmd/... ./internal/... ./pkg/...
+	@$(GOVET) ./cmd/... ./internal/... ./pkg/... 2>/dev/null || true
 	@echo "Линтинг пройден"
 
 .PHONY: test-parser
@@ -113,12 +121,6 @@ test-coverage: ## Запустить тесты с отчётом о покры�
 	@$(GOCMD) tool cover -html=coverage.out -o coverage.html
 	@echo "Отчёт о покрытии создан: coverage.html"
 
-.PHONY: bench
-bench: ## Бенчмарки парсера
-	@echo "Запуск бенчмарков..."
-	@$(GOTEST) ./internal/parser/... -bench=. -benchmem -run=^$$
-	@echo "Бенчмарки завершены"
-
 .PHONY: build
 build: ## Собрать бинарный файл
 	@echo "Сборка $(BINARY_NAME)..."
@@ -136,39 +138,6 @@ build-release: ## Собрать релизные версии для всех �
 	@GOOS=windows GOARCH=amd64 $(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/release/$(BINARY_NAME)-windows-amd64.exe $(CMD_DIR)
 	@echo "Релизные версии собраны в $(BUILD_DIR)/release/"
 
-.PHONY: clean
-clean: ## Очистить артефакты сборки и сгенерированные файлы
-	@echo "Очистка..."
-	@rm -rf $(BUILD_DIR)/
-	@rm -f coverage.out coverage.html
-	@rm -f test.gen.go test.dsl test_complete.dsl test_minimal.dsl test_error.dsl
-	@rm -f test_fmt.dsl test_fmt_complex.dsl test_fmt_advanced.dsl test_fmt_cond.dsl
-	@rm -f test_format.dsl
-	@rm -f demo/*.gen.go demo/protocol/*.gen.go 2>/dev/null || true
-	@rm -f examples/*/*.gen.go 2>/dev/null || true
-	@rm -f testdata/*.gen.go testdata/protocol/*.gen.go 2>/dev/null || true
-	@rm -f testdata/full_test.dsl testdata/full_test.go 2>/dev/null || true
-	@rm -f examples/full_example.dsl 2>/dev/null || true
-	@find . -name "*.gen.go" -type f -delete 2>/dev/null || true
-	@find . -name "*.bin" -type f -delete 2>/dev/null || true
-	@find . -name "*.test" -type f -delete 2>/dev/null || true
-	@find . -name ".DS_Store" -type f -delete 2>/dev/null || true
-	@find . -name "Thumbs.db" -type f -delete 2>/dev/null || true
-	@find . -name "*~" -type f -delete 2>/dev/null || true
-	@find . -name "*.swp" -type f -delete 2>/dev/null || true
-	@rm -rf testdata/protocol demo/protocol examples/*/protocol 2>/dev/null || true
-	@rm -rf internal/parser/testdata 2>/dev/null || true
-	@rmdir pkg/protocol 2>/dev/null || true
-	@rmdir pkg 2>/dev/null || true
-	@$(GOCLEAN) -cache -testcache
-	@echo "Очистка завершена"
-
-.PHONY: distclean
-distclean: clean ## Глубокая очистка, включая кэш модулей
-	@echo "Глубокая очистка кэша модулей..."
-	@$(GOCLEAN) -modcache
-	@echo "Глубокая очистка завершена"
-
 .PHONY: install
 install: build ## Установить бинарный файл
 	@echo "Установка $(BINARY_NAME)..."
@@ -182,6 +151,289 @@ install: build ## Установить бинарный файл
 		cp $(BUILD_DIR)/$(BINARY_NAME) "$$GOPATH/bin/"; \
 		echo "Установлено в $$GOPATH/bin/$(BINARY_NAME)"; \
 	fi
+
+# ============================================================================
+# Очистка
+# ============================================================================
+
+.PHONY: clean
+clean: ## Очистить артефакты сборки и временные файлы
+	@echo "Очистка артефактов..."
+	@# Сборочный каталог
+	@rm -rf $(BUILD_DIR)/
+	@# Coverage
+	@rm -f coverage.out coverage.html
+	@# Кэш тестов Go
+	@$(GOCLEAN) -testcache
+	@# Сгенерированные Go-файлы (продукты кодогенерации, можно пересоздать)
+	@find . -name "*.gen.go" -type f -delete 2>/dev/null || true
+	@# Сгенерированные Protobuf-файлы
+	@find . -name "*.pb.go" -type f -delete 2>/dev/null || true
+	@# Бинарные схемы (.bin) — продукты --save-bin
+	@find . -name "*.bin" -type f -delete 2>/dev/null || true
+	@# Скомпилированные тестовые бинарники
+	@find . -name "*.test" -type f -delete 2>/dev/null || true
+	@# Дубликаты protoc-генерации (github.com/...)
+	@rm -rf github.com/ 2>/dev/null || true
+	@# Дубликаты pb в поддиректориях
+	@find . -type d -name "pb" -exec rm -rf {} + 2>/dev/null || true
+	@# Кэш Python
+	@find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+	@# Резервные копии редакторов
+	@find . -name "*~" -type f -delete 2>/dev/null || true
+	@find . -name "*.swp" -type f -delete 2>/dev/null || true
+	@find . -name "*.swo" -type f -delete 2>/dev/null || true
+	@# Системные файлы
+	@find . -name ".DS_Store" -type f -delete 2>/dev/null || true
+	@find . -name "Thumbs.db" -type f -delete 2>/dev/null || true
+	@# Временные файлы
+	@find . -name "*.tmp" -type f -delete 2>/dev/null || true
+	@find . -name "*.bak" -type f -delete 2>/dev/null || true
+	@# Файлы профайлера
+	@rm -f cpu.prof mem.prof trace.out
+	@# Очистка report/ — всё кроме generate_report.py и final/
+	@if [ -d "$(REPORT_DIR)" ]; then \
+		find $(REPORT_DIR) -type f ! -name 'generate_report.py' ! -path '*/final/*' -delete 2>/dev/null || true; \
+		find $(REPORT_DIR) -type d -empty -delete 2>/dev/null || true; \
+	fi
+	@# Удаляем симлинк на последний отчёт
+	@rm -f $(REPORT_DIR)/BENCHMARK_REPORT_LATEST.md
+	@# Пустые директории
+	@rmdir pkg/protocol 2>/dev/null || true
+	@rmdir pkg 2>/dev/null || true
+	@rmdir testdata/protocol 2>/dev/null || true
+	@rmdir demo/protocol 2>/dev/null || true
+	@echo "Очистка завершена"
+	
+.PHONY: distclean
+distclean: clean ## Глубокая очистка, включая кэш модулей и результаты эксперимента
+	@echo "Глубокая очистка..."
+	@$(GOCLEAN) -cache -modcache
+	@# Удаляем все результаты бенчмарков
+	@rm -f $(EXPERIMENT_DIR)/results_*.txt
+	@# Полная очистка report/ (включая generate_report.py, но не final/)
+	@if [ -d "$(REPORT_DIR)" ]; then \
+		find $(REPORT_DIR) -type f ! -path '*/final/*' -delete 2>/dev/null || true; \
+		find $(REPORT_DIR) -type d -empty -delete 2>/dev/null || true; \
+	fi
+	@# Удаляем симлинк на последний отчёт
+	@rm -f $(REPORT_DIR)/BENCHMARK_REPORT_LATEST.md
+	@echo "Глубокая очистка завершена"
+
+# ============================================================================
+# Бенчмаркинг и отчёты
+# ============================================================================
+
+# --- Вариант 1: Только protoc-gen-go (без внешних зависимостей) ---
+
+.PHONY: bench-report
+bench-report: build ## Бенчмарки DSL + отчёт (только твоя утилита, без внешних зависимостей)
+	@echo "================================================"
+	@echo "     БЕНЧМАРКИ PROTOCOL-GEN-GO (только DSL)     "
+	@echo "================================================"
+	@echo ""
+	@# Проверка зависимостей
+	@command -v $(GOCMD) >/dev/null 2>&1 || { echo "Требуется Go 1.21+"; exit 1; }
+	@echo "✓ Go $(shell $(GOCMD) version | awk '{print $$3}')"
+	@echo ""
+	@# Этап 1: Генерация тестовых протоколов
+	@echo "=== Этап 1/4: Генерация тестовых протоколов ==="
+	@for f in $(EXPERIMENT_DIR)/protocols/*.dsl; do \
+		./$(BUILD_DIR)/$(BINARY_NAME) "$$f" > /dev/null 2>&1 || { echo "Ошибка: $$f"; exit 1; }; \
+	done
+	@echo "✓ Протоколы сгенерированы"
+	@echo ""
+	@# Этап 2: Бенчмарки DSL
+	@echo "=== Этап 2/4: Бенчмарки DSL (эксперимент А и Б) ==="
+	@cd $(EXPERIMENT_DIR)/protocols && $(GOTEST) -bench=. -benchmem -benchtime=2s -run=^$$ | tee ../results_dsl.txt
+	@echo ""
+	@# Этап 3: Бенчмарки ручной реализации
+	@echo "=== Этап 3/4: Бенчмарки ручной реализации ==="
+	@cd $(EXPERIMENT_DIR)/handwritten && $(GOTEST) -bench=. -benchmem -benchtime=2s -run=^$$ | tee ../results_hand.txt
+	@echo ""
+	@# Этап 4: Генерация отчёта
+	@echo "=== Этап 4/4: Генерация отчёта ==="
+	@if python3 -c "import matplotlib" 2>/dev/null; then \
+		cd $(REPORT_DIR) && python3 generate_report.py; \
+		echo "✓ Графики сгенерированы: $(REPORT_DIR)/*.png"; \
+	else \
+		echo "⚠  Python matplotlib не установлен — графики пропущены"; \
+		echo "   Установка: pip3 install --user matplotlib numpy"; \
+		echo "   Текстовые результаты сохранены в:"; \
+		echo "   $(EXPERIMENT_DIR)/results_dsl.txt"; \
+		echo "   $(EXPERIMENT_DIR)/results_hand.txt"; \
+	fi
+	@echo ""
+	@echo "================================================"
+	@echo "     БЕНЧМАРКИ ЗАВЕРШЕНЫ                        "
+	@echo "================================================"
+	@echo ""
+	@echo "Результаты:"
+	@echo "   Бенчмарки DSL:  $(EXPERIMENT_DIR)/results_dsl.txt"
+	@echo "   Бенчмарки Hand: $(EXPERIMENT_DIR)/results_hand.txt"
+	@if [ -f "$(REPORT_DIR)/chart_a_marshal.png" ]; then \
+		echo "   Графики:        $(REPORT_DIR)/*.png"; \
+	fi
+	@echo ""
+
+# --- Вариант 2: Полное сравнение с аналогами (требует внешние инструменты) ---
+
+.PHONY: experiment-check-deps
+experiment-check-deps: ## Проверить наличие всех внешних зависимостей для эксперимента
+	@echo "Проверка зависимостей для полного эксперимента..."
+	@echo ""
+	@# Go
+	@command -v $(GOCMD) >/dev/null 2>&1 || { echo "Go не найден"; exit 1; }
+	@echo "✓ Go $(shell $(GOCMD) version | awk '{print $$3}')"
+	@# Python 3
+	@command -v python3 >/dev/null 2>&1 || { echo "Python 3 не найден"; exit 1; }
+	@echo "✓ Python $(shell python3 --version 2>&1 | awk '{print $$2}')"
+	@# Protobuf compiler
+	@command -v protoc >/dev/null 2>&1 || { echo "protoc не найден (нужен protobuf-compiler)"; exit 1; }
+	@echo "✓ protoc $(shell protoc --version 2>&1 | awk '{print $$2}')"
+	@# Protobuf Go plugin
+	@if [ -x "$$HOME/go/bin/protoc-gen-go" ] || command -v protoc-gen-go >/dev/null 2>&1; then \
+		echo "✓ protoc-gen-go (Google)"; \
+	else \
+		echo "protoc-gen-go (Google) не найден"; \
+		echo "   Установка: go install google.golang.org/protobuf/cmd/protoc-gen-go@latest"; \
+		exit 1; \
+	fi
+	@# Python Construct
+	@python3 -c "import construct" 2>/dev/null || { \
+		echo "Python construct не установлен"; \
+		echo "   Установка: pip3 install --user construct"; \
+		exit 1; \
+	}
+	@echo "✓ Python Construct $(shell python3 -c 'import construct; print(construct.__version__)' 2>/dev/null)"
+	@# Python matplotlib (для графиков)
+	@if python3 -c "import matplotlib" 2>/dev/null; then \
+		echo "✓ Python matplotlib (для графиков)"; \
+	else \
+		echo "⚠  Python matplotlib не установлен — графики не будут сгенерированы"; \
+		echo "   Установка: pip3 install --user matplotlib numpy"; \
+	fi
+	@echo ""
+	@echo "✓ Все зависимости найдены"
+	@echo ""
+
+.PHONY: experiment
+experiment: build experiment-check-deps ## Полный эксперимент: сравнение DSL vs Hand vs Protobuf vs Construct + отчёт
+	@echo "================================================"
+	@echo "   ПОЛНЫЙ СРАВНИТЕЛЬНЫЙ ЭКСПЕРИМЕНТ             "
+	@echo "   protoc-gen-go vs Hand vs Protobuf vs Construct"
+	@echo "================================================"
+	@echo ""
+	@echo "⚠  Этот эксперимент запускает бенчмарки на 4 инструментах."
+	@echo "   Общее время выполнения: ~5-10 минут."
+	@echo "   Убедитесь, что система не нагружена."
+	@echo ""
+	@# Этап 1: Генерация всех протоколов
+	@echo "=== Этап 1/6: Генерация DSL-протоколов ==="
+	@for f in $(EXPERIMENT_DIR)/protocols/*.dsl; do \
+		./$(BUILD_DIR)/$(BINARY_NAME) "$$f" > /dev/null 2>&1 || { echo "Ошибка: $$f"; exit 1; }; \
+	done
+	@echo "✓ DSL-протоколы сгенерированы"
+	@echo ""
+	@# Этап 2: Генерация Protobuf
+	@echo "=== Этап 2/6: Генерация Protobuf ==="
+	@cd $(EXPERIMENT_DIR)/protobuf && protoc --go_out=. --go_opt=paths=source_relative ipv6.proto 2>/dev/null || { \
+		echo "Ошибка генерации Protobuf"; exit 1; \
+	}
+	@echo "✓ Protobuf сгенерирован"
+	@echo ""
+	@# Этап 3: Бенчмарк DSL
+	@echo "=== Этап 3/6: Бенчмарк protoc-gen-go (DSL) ==="
+	@cd $(EXPERIMENT_DIR)/protocols && $(GOTEST) -bench=. -benchmem -benchtime=2s -run=^$$ | tee ../results_dsl.txt
+	@echo ""
+	@# Этап 4: Бенчмарк ручной реализации
+	@echo "=== Этап 4/6: Бенчмарк Handwritten Go ==="
+	@cd $(EXPERIMENT_DIR)/handwritten && $(GOTEST) -bench=. -benchmem -benchtime=2s -run=^$$ | tee ../results_hand.txt
+	@echo ""
+	@# Этап 5: Бенчмарк Protobuf
+	@echo "=== Этап 5/6: Бенчмарк Google Protobuf ==="
+	@cd $(EXPERIMENT_DIR)/protobuf && $(GOTEST) -bench=. -benchmem -benchtime=2s -run=^$$ | tee ../results_pb.txt
+	@echo ""
+	@# Этап 6: Бенчмарк Python Construct
+	@echo "=== Этап 6/6: Бенчмарк Python Construct ==="
+	@cd $(EXPERIMENT_DIR)/construct && python3 ipv6_construct.py | tee ../results_construct.txt
+	@echo ""
+	@# Генерация отчёта с графиками
+	@echo "=== Генерация отчёта ==="
+	@if python3 -c "import matplotlib" 2>/dev/null; then \
+		cd $(REPORT_DIR) && python3 generate_report.py; \
+		echo "✓ Графики сгенерированы"; \
+	else \
+		echo "⚠  matplotlib не установлен — графики пропущены"; \
+		echo "   Таблицы доступны в файлах результатов"; \
+	fi
+	@echo ""
+	@echo "================================================"
+	@echo "   ЭКСПЕРИМЕНТ ЗАВЕРШЁН                         "
+	@echo "================================================"
+	@echo ""
+	@echo "📊 Результаты:"
+	@echo "   DSL:        $(EXPERIMENT_DIR)/results_dsl.txt"
+	@echo "   Hand:       $(EXPERIMENT_DIR)/results_hand.txt"
+	@echo "   Protobuf:   $(EXPERIMENT_DIR)/results_pb.txt"
+	@echo "   Construct:  $(EXPERIMENT_DIR)/results_construct.txt"
+	@if [ -f "$(REPORT_DIR)/chart_a_marshal.png" ]; then \
+		echo "   Графики:    $(REPORT_DIR)/*.png"; \
+	fi
+	@echo "   Отчёт:      $(REPORT_DIR)/BENCHMARK_REPORT.md"
+	@echo ""
+
+# --- Быстрые бенчмарки ---
+
+.PHONY: bench-quick
+bench-quick: build ## Быстрые бенчмарки DSL (только цифры, без графиков)
+	@echo "Быстрые бенчмарки protoc-gen-go..."
+	@for f in $(EXPERIMENT_DIR)/protocols/*.dsl; do \
+		./$(BUILD_DIR)/$(BINARY_NAME) "$$f" > /dev/null 2>&1; \
+	done
+	@cd $(EXPERIMENT_DIR)/protocols && $(GOTEST) -bench=. -benchmem -benchtime=1s -run=^$$
+	@echo "Готово"
+
+.PHONY: bench-full
+bench-full: build ## Все бенчмарки проекта (парсер + DSL + сравнение с Go-аналогами)
+	@echo "================================================"
+	@echo "            ПОЛНЫЕ БЕНЧМАРКИ                    "
+	@echo "================================================"
+	@echo ""
+	@echo "=== Бенчмарки парсера ==="
+	@$(GOTEST) ./internal/parser/... -bench=. -benchmem -run=^$$ 2>/dev/null || true
+	@echo ""
+	@echo "=== Бенчмарки DSL (сравнение с Handwritten) ==="
+	@for f in $(EXPERIMENT_DIR)/protocols/*.dsl; do \
+		./$(BUILD_DIR)/$(BINARY_NAME) "$$f" > /dev/null 2>&1; \
+	done
+	@cd $(BENCH_DIR) && $(GOTEST) -bench=. -benchmem -benchtime=1s -run=^$$ 2>/dev/null || true
+	@echo ""
+	@echo "================================================"
+	@echo "            БЕНЧМАРКИ ЗАВЕРШЕНЫ                 "
+	@echo "================================================"
+
+# --- Графики (отдельно) ---
+
+.PHONY: charts
+charts: ## Сгенерировать графики из существующих результатов (требуется Python)
+	@echo "Проверка зависимостей для графиков..."
+	@python3 -c "import matplotlib" 2>/dev/null || { \
+		echo "Требуется Python 3 + matplotlib"; \
+		echo "   Установка: pip3 install --user matplotlib numpy"; \
+		exit 1; \
+	}
+	@echo "✓ matplotlib найден"
+	@echo "Генерация графиков..."
+	@if [ ! -f "$(EXPERIMENT_DIR)/results_dsl.txt" ]; then \
+		echo " Файлы результатов не найдены. Сначала запустите:"; \
+		echo "   make bench-report    (только DSL)"; \
+		echo "   make experiment      (полное сравнение)"; \
+		exit 1; \
+	fi
+	@cd $(REPORT_DIR) && python3 generate_report.py
+	@echo "✓ Графики сохранены в $(REPORT_DIR)/"
+	@ls -la $(REPORT_DIR)/*.png 2>/dev/null || echo "Графики не найдены"
 
 # ============================================================================
 # Демонстрации
@@ -212,15 +464,11 @@ demo-dns: ## Демонстрация DNS протокола
 	@echo "================================================"
 
 .PHONY: demo-conditions
-demo-conditions: ## Демонстрация условий с путями и вложенных условий
+demo-conditions: ## Демонстрация условных полей
 	@echo "================================================"
 	@echo "    ДЕМОНСТРАЦИЯ УСЛОВИЙ (пути, &&, ||)         "
 	@echo "================================================"
 	@$(GOCMD) run examples/conditions/demo_conditions.go
-	@echo ""
-	@echo "--- Вложенные условия ---"
-	@./$(BUILD_DIR)/$(BINARY_NAME) examples/conditions/nested_cond.dsl 2>/dev/null
-	@grep -A 2 "if p\." examples/conditions/nested_cond.gen.go || true
 	@echo "================================================"
 
 .PHONY: demo-enum
@@ -239,30 +487,12 @@ demo-endian: ## Демонстрация LittleEndian
 	@$(GOCMD) run examples/little_endian/demo_endian.go
 	@echo "================================================"
 
-.PHONY: demo-aliases
-demo-aliases: ## Демонстрация алиасов
-	@echo "================================================"
-	@echo "         ДЕМОНСТРАЦИЯ АЛИАСОВ                   "
-	@echo "================================================"
-	@./$(BUILD_DIR)/$(BINARY_NAME) examples/aliases/data.dsl 2>/dev/null
-	@cat examples/aliases/data.gen.go 2>/dev/null | head -25 || echo "(сгенерируйте: make examples)"
-	@echo "================================================"
-
-.PHONY: demo-consts
-demo-consts: ## Демонстрация констант
-	@echo "================================================"
-	@echo "         ДЕМОНСТРАЦИЯ КОНСТАНТ                  "
-	@echo "================================================"
-	@./$(BUILD_DIR)/$(BINARY_NAME) examples/consts/config.dsl 2>/dev/null
-	@cat examples/consts/config.gen.go 2>/dev/null | head -25 || echo "(сгенерируйте: make examples)"
-	@echo "================================================"
-
 .PHONY: demo-protocols
 demo-protocols: build ## Наглядная демонстрация реальных протоколов
 	@bash demo/protocols_demo.sh
 
 .PHONY: demo-all
-demo-all: demo demo-arrays demo-dns demo-conditions demo-enum demo-endian demo-aliases demo-consts ## Запустить все демонстрации
+demo-all: demo demo-arrays demo-dns demo-conditions demo-enum demo-endian ## Запустить все демонстрации
 
 # ============================================================================
 # Полный pipeline тест

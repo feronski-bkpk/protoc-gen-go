@@ -1,0 +1,21 @@
+=== Эксперимент А: Варьирование размера ===
+ConstructBuild_64B_0ext: 64339.5 ns/op
+ConstructParse_64B_0ext: 72391.2 ns/op
+ConstructBuild_256B_2ext: 103917.9 ns/op
+ConstructParse_256B_2ext: 103819.1 ns/op
+ConstructBuild_1024B_4ext: 149645.5 ns/op
+ConstructParse_1024B_4ext: 148462.0 ns/op
+ConstructBuild_4096B_4ext: 157154.0 ns/op
+ConstructParse_4096B_4ext: 153492.2 ns/op
+
+=== Эксперимент Б: Варьирование сложности ===
+ConstructBuild_1024B_Ext0: 66402.1 ns/op
+ConstructParse_1024B_Ext0: 65328.0 ns/op
+ConstructBuild_1024B_Ext1: 86985.4 ns/op
+ConstructParse_1024B_Ext1: 85801.3 ns/op
+ConstructBuild_1024B_Ext2: 106137.2 ns/op
+ConstructParse_1024B_Ext2: 104310.9 ns/op
+ConstructBuild_1024B_Ext3: 125652.0 ns/op
+ConstructParse_1024B_Ext3: 123470.5 ns/op
+ConstructBuild_1024B_Ext4: 148161.0 ns/op
+ConstructParse_1024B_Ext4: 146730.0 ns/op

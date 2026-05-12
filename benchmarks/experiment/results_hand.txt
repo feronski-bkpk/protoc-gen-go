@@ -1,0 +1,26 @@
+goos: linux
+goarch: amd64
+pkg: github.com/feronski-bkpk/protoc-gen-go/benchmarks/experiment/handwritten
+cpu: Intel(R) Core(TM) i3-7020U CPU @ 2.30GHz
+BenchmarkHandBuild_64B_0ext-4     	12219384	       190.5 ns/op	     256 B/op	       3 allocs/op
+BenchmarkHandParse_64B_0ext-4     	37711633	        65.44 ns/op	      64 B/op	       1 allocs/op
+BenchmarkHandBuild_256B_2ext-4    	 4535113	       521.3 ns/op	     928 B/op	       6 allocs/op
+BenchmarkHandParse_256B_2ext-4    	18326445	       131.7 ns/op	     256 B/op	       1 allocs/op
+BenchmarkHandBuild_1024B_4ext-4   	 1731591	      1914 ns/op	    3456 B/op	       8 allocs/op
+BenchmarkHandParse_1024B_4ext-4   	 4572249	       468.9 ns/op	    1024 B/op	       1 allocs/op
+BenchmarkHandBuild_4096B_4ext-4   	  532485	      6302 ns/op	   13952 B/op	       8 allocs/op
+BenchmarkHandParse_4096B_4ext-4   	 1301463	      1638 ns/op	    4096 B/op	       1 allocs/op
+BenchmarkHandBuild_64K_4ext-4     	   31400	     72714 ns/op	  204928 B/op	       8 allocs/op
+BenchmarkHandParse_64K_4ext-4     	  122816	     21791 ns/op	   65536 B/op	       1 allocs/op
+BenchmarkHandBuild_1024B_Ext0-4   	 1493631	      1405 ns/op	    3328 B/op	       3 allocs/op
+BenchmarkHandBuild_1024B_Ext1-4   	 1671938	      1415 ns/op	    3336 B/op	       4 allocs/op
+BenchmarkHandBuild_1024B_Ext2-4   	 1565749	      1539 ns/op	    3392 B/op	       6 allocs/op
+BenchmarkHandBuild_1024B_Ext3-4   	 1522530	      1624 ns/op	    3432 B/op	       7 allocs/op
+BenchmarkHandBuild_1024B_Ext4-4   	 1438791	      1691 ns/op	    3456 B/op	       8 allocs/op
+BenchmarkHandParse_1024B_Ext0-4   	 5324160	       436.4 ns/op	    1024 B/op	       1 allocs/op
+BenchmarkHandParse_1024B_Ext1-4   	 5284674	       456.1 ns/op	    1024 B/op	       1 allocs/op
+BenchmarkHandParse_1024B_Ext2-4   	 5036979	       466.1 ns/op	    1024 B/op	       1 allocs/op
+BenchmarkHandParse_1024B_Ext3-4   	 5433914	       435.5 ns/op	    1024 B/op	       1 allocs/op
+BenchmarkHandParse_1024B_Ext4-4   	 4836452	       431.0 ns/op	    1024 B/op	       1 allocs/op
+PASS
+ok  	github.com/feronski-bkpk/protoc-gen-go/benchmarks/experiment/handwritten	66.683s

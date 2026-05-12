@@ -29,7 +29,7 @@ func NewAnalyzer(proto *ast.Protocol) *Analyzer {
 
 func (a *Analyzer) Analyze() error {
 	a.buildSymbolTable(a.proto.Fields, "", 0)
-	a.computeOffsets(a.proto.Fields, 0)
+	a.computeOffsets(a.proto.Fields, "", 0)
 	a.validateReferences()
 	a.validateBitFields()
 	a.validateCycles()
@@ -97,16 +97,17 @@ func (a *Analyzer) buildSymbolTable(fields []ast.Field, parentPath string, baseO
 	return offset - baseOffset
 }
 
-func (a *Analyzer) computeOffsets(fields []ast.Field, baseOffset int) {
+func (a *Analyzer) computeOffsets(fields []ast.Field, parentPath string, baseOffset int) {
 	offset := baseOffset
 
 	for _, field := range fields {
 		path := field.GetName()
-		for key, info := range a.symbolTable {
-			if strings.HasSuffix(key, path) {
-				info.Offset = offset
-				break
-			}
+		if parentPath != "" {
+			path = parentPath + "." + path
+		}
+
+		if info, ok := a.symbolTable[path]; ok {
+			info.Offset = offset
 		}
 
 		switch f := field.(type) {
@@ -116,8 +117,17 @@ func (a *Analyzer) computeOffsets(fields []ast.Field, baseOffset int) {
 
 		case *ast.StructField:
 			f.Offset = offset
-			a.computeOffsets(f.Struct.Fields, offset)
-			offset += a.symbolTable[path].Size
+			if f.Struct != nil && f.Struct.Fields != nil {
+				innerSize := a.symbolTable[path].Size
+				if innerSize == 0 {
+					innerSize = a.computeStructSize(f.Struct.Fields)
+					a.symbolTable[path].Size = innerSize
+				}
+				a.computeOffsets(f.Struct.Fields, path, offset)
+				offset += innerSize
+			} else {
+				offset += f.GetSize()
+			}
 
 		case *ast.BitStructField:
 			offset += 1
@@ -130,6 +140,27 @@ func (a *Analyzer) computeOffsets(fields []ast.Field, baseOffset int) {
 		case *ast.BytesField:
 		}
 	}
+}
+
+func (a *Analyzer) computeStructSize(fields []ast.Field) int {
+	size := 0
+	for _, field := range fields {
+		switch f := field.(type) {
+		case *ast.ScalarField:
+			size += f.GetSize()
+		case *ast.StructField:
+			if f.Struct != nil {
+				size += a.computeStructSize(f.Struct.Fields)
+			}
+		case *ast.BitStructField:
+			size += 1
+		case *ast.ArrayField:
+			if f.FixedLength > 0 {
+				size += f.ElementType.GetSize() * f.FixedLength
+			}
+		}
+	}
+	return size
 }
 
 func (a *Analyzer) validateReferences() {

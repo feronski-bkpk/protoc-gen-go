@@ -31,14 +31,15 @@ func (s ScalarType) Size() int {
 }
 
 type Protocol struct {
-	Name     string
-	PacketID uint16
-	Fields   []Field
-	Types    map[string]*StructType
-	Enums    map[string]*EnumType
-	Aliases  map[string]string
-	Consts   map[string]int
-	Endian   string
+	Name        string
+	PackageName string
+	PacketID    uint16
+	Fields      []Field
+	Types       map[string]*StructType
+	Enums       map[string]*EnumType
+	Aliases     map[string]string
+	Consts      map[string]int
+	Endian      string
 }
 
 type EnumType struct {

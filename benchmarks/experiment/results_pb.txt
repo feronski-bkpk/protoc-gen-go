@@ -1,0 +1,26 @@
+goos: linux
+goarch: amd64
+pkg: github.com/feronski-bkpk/protoc-gen-go/benchmarks/experiment/protobuf
+cpu: Intel(R) Core(TM) i3-7020U CPU @ 2.30GHz
+BenchmarkPBBuild_64B_0ext-4     	 2106480	      1252 ns/op	     752 B/op	       9 allocs/op
+BenchmarkPBParse_64B_0ext-4     	 2076258	      1077 ns/op	     376 B/op	       7 allocs/op
+BenchmarkPBBuild_256B_2ext-4    	 1070589	      2235 ns/op	    1992 B/op	      15 allocs/op
+BenchmarkPBParse_256B_2ext-4    	 1267441	      1896 ns/op	     904 B/op	      11 allocs/op
+BenchmarkPBBuild_1024B_4ext-4   	  526796	      4144 ns/op	    5848 B/op	      21 allocs/op
+BenchmarkPBParse_1024B_4ext-4   	  724371	      2880 ns/op	    2688 B/op	      14 allocs/op
+BenchmarkPBBuild_4096B_4ext-4   	  274862	      8385 ns/op	   20696 B/op	      21 allocs/op
+BenchmarkPBParse_4096B_4ext-4   	  439092	      4802 ns/op	   10112 B/op	      14 allocs/op
+BenchmarkPBBuild_64K_4ext-4     	   33271	     76251 ns/op	  295640 B/op	      21 allocs/op
+BenchmarkPBParse_64K_4ext-4     	   71922	     32515 ns/op	  131456 B/op	      14 allocs/op
+BenchmarkPBBuild_1024B_Ext0-4   	  811327	      2496 ns/op	    5136 B/op	       9 allocs/op
+BenchmarkPBBuild_1024B_Ext1-4   	  713196	      2956 ns/op	    5488 B/op	      12 allocs/op
+BenchmarkPBBuild_1024B_Ext2-4   	  670405	      3417 ns/op	    5608 B/op	      15 allocs/op
+BenchmarkPBBuild_1024B_Ext3-4   	  557210	      3819 ns/op	    5736 B/op	      18 allocs/op
+BenchmarkPBBuild_1024B_Ext4-4   	  548988	      4185 ns/op	    5848 B/op	      21 allocs/op
+BenchmarkPBParse_1024B_Ext0-4   	 1392248	      1698 ns/op	    2408 B/op	       7 allocs/op
+BenchmarkPBParse_1024B_Ext1-4   	  914640	      2380 ns/op	    2648 B/op	      11 allocs/op
+BenchmarkPBParse_1024B_Ext2-4   	  866762	      2470 ns/op	    2632 B/op	      11 allocs/op
+BenchmarkPBParse_1024B_Ext3-4   	  898660	      2672 ns/op	    2672 B/op	      13 allocs/op
+BenchmarkPBParse_1024B_Ext4-4   	  826138	      2918 ns/op	    2688 B/op	      14 allocs/op
+PASS
+ok  	github.com/feronski-bkpk/protoc-gen-go/benchmarks/experiment/protobuf	59.077s

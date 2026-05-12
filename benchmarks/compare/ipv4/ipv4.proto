@@ -1,0 +1,18 @@
+syntax = "proto3";
+package ipv4;
+
+option go_package = "github.com/feronski-bkpk/protoc-gen-go/benchmarks/compare/ipv4";
+
+message Ipv4Header {
+  uint32 version_ihl = 1;
+  uint32 dscp_ecn = 2;
+  uint32 total_length = 3;
+  uint32 identification = 4;
+  uint32 flags_fragment = 5;
+  uint32 fragment_offset = 6;
+  uint32 ttl = 7;
+  uint32 proto = 8;
+  uint32 header_checksum = 9;
+  uint32 src_addr = 10;
+  uint32 dst_addr = 11;
+}

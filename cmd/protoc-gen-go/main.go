@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -110,6 +111,13 @@ func main() {
 	}
 
 	fmt.Printf("Успешно разобран протокол: %s (ID: 0x%04X)\n", proto.Name, proto.PacketID)
+	if proto.PackageName == "" {
+		dir := strings.TrimSuffix(filename, "/"+filepath.Base(filename))
+		if dir == filename {
+			dir = "."
+		}
+		proto.PackageName = filepath.Base(dir)
+	}
 	fmt.Printf("Всего полей: %d\n", len(proto.Fields))
 
 	fmt.Printf("\nАнализ протокола...\n")
